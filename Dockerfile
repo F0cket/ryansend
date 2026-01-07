@@ -3,11 +3,13 @@ FROM rust:1.92 AS builder
 
 WORKDIR /usr/src/app
 
-# Copy manifests
+# Copy manifests and configuration
 COPY Cargo.toml ./
+COPY askama.toml ./
 
-# Copy source code
+# Copy source code and templates
 COPY src ./src
+COPY templates ./templates
 
 # Build the application in release mode
 RUN cargo build --release
