@@ -18,3 +18,8 @@ rand = "0.9"
 log = "0.4"
 env_logger = "0.10"
 tokio-util = { version = "0.7", features = ["io"] }
+askama = "0.12"
+argon2 = { version = "0.5", features = ["std"] }
+rpassword = "7.3"
+axum-extra = { version = "0.9", features = ["cookie"] }
+time = "0.3"

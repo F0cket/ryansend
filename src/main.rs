@@ -2,24 +2,21 @@
 // (dependencies may still use unsafe code, but our code cannot)
 #![forbid(unsafe_code)]
 
-use anyhow::{anyhow, Result};
-use axum::{
-    body::Body,
-    extract::{Query, State},
-    http::{header, HeaderValue, StatusCode},
-    response::Response,
-    routing::get,
-    Router,
-};
-use chrono::{DateTime, Duration, Utc};
+mod admin;
+mod auth;
+mod config;
+mod error;
+mod server;
+
+use anyhow::Result;
 use clap::{Parser, Subcommand};
-use log::{debug, error, info, warn};
-use rand::prelude::*;
-use rusty_paseto::prelude::*;
-use serde::{Deserialize, Serialize};
-use std::path::{Path, PathBuf};
-use tokio::fs;
-use tokio_util::io::ReaderStream;
+use log::{error, info};
+use std::path::PathBuf;
+
+use crate::admin::run_admin_server;
+use crate::auth::generate_url;
+use crate::config::{init_config, load_config, update_admin_password};
+use crate::server::run_server;
 
 #[derive(Parser)]
 #[command(name = "ryansend")]
@@ -43,239 +40,37 @@ enum Commands {
         #[arg(long, default_value = "3600")]
         expires_in: u64, // seconds, default 1 hour
     },
-}
-
-#[derive(Debug, Serialize, Deserialize, Clone)]
-struct Config {
-    base_url: String,
-    port: u16,
-    secret_key: String,
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-struct TokenClaims {
-    path: String,
-    exp: DateTime<Utc>,
-}
-
-#[derive(Clone)]
-struct AppState {
-    config: Config,
-}
-
-#[derive(Deserialize)]
-struct DownloadQuery {
-    token: String,
-}
-
-async fn load_config() -> Result<Config> {
-    let config_content = fs::read_to_string("config.yaml").await.map_err(|_| {
-        anyhow!("Failed to read config.yaml. Make sure it exists in the current directory")
-    })?;
-
-    let mut config: Config = serde_yaml::from_str(&config_content)
-        .map_err(|e| anyhow!("Failed to parse config.yaml: {}", e))?;
-
-    // Override base_url with environment variable if present
-    if let Ok(env_base_url) = std::env::var("RYANSEND_BASE_URL") {
-        config.base_url = env_base_url;
-    }
-
-    // Override port with environment variable if present
-    if let Ok(env_port) = std::env::var("RYANSEND_PORT") {
-        config.port = env_port.parse().unwrap_or(config.port);
-    }
-
-    Ok(config)
-}
-
-async fn generate_token(
-    config: &Config,
-    file_path: &Path,
-    expires_in_seconds: u64,
-) -> Result<String> {
-    // Verify the file exists
-    if !file_path.exists() {
-        return Err(anyhow!("File does not exist: {}", file_path.display()));
-    }
-
-    let now = Utc::now();
-    let exp = now + Duration::seconds(expires_in_seconds as i64);
-
-    let claims = TokenClaims {
-        path: file_path.to_string_lossy().to_string(),
-        exp,
-    };
-
-    // Parse PASERK key from config
-    let key = PasetoSymmetricKey::<V4, Local>::try_from_paserk_str(&config.secret_key)
-        .map_err(|e| anyhow!("Invalid PASERK key in config: {}", e))?;
-
-    // Build PASETO token with claims
-    let token = PasetoBuilder::<V4, Local>::default()
-        .set_claim(ExpirationClaim::try_from(claims.exp.to_rfc3339())?)
-        .set_claim(CustomClaim::try_from(("path", claims.path.clone()))?)
-        .build(&key)?;
-
-    Ok(token)
-}
-
-async fn verify_token_and_get_path(secret_key: &str, token: &str) -> Result<String> {
-    // Parse PASERK key from config
-    let key = PasetoSymmetricKey::<V4, Local>::try_from_paserk_str(secret_key)
-        .map_err(|e| anyhow!("Invalid PASERK key in config: {}", e))?;
-
-    // Parse and validate PASETO token
-    let parsed_token = PasetoParser::<V4, Local>::default().parse(token, &key)?;
-
-    // Extract the path from the custom claim
-    let path = parsed_token["path"]
-        .as_str()
-        .ok_or_else(|| anyhow!("Missing or invalid path claim"))?;
-
-    Ok(path.to_string())
-}
-
-async fn download_handler(
-    State(state): State<AppState>,
-    Query(params): Query<DownloadQuery>,
-) -> Result<Response, StatusCode> {
-    debug!(
-        "Download request with token: {}...",
-        &params.token[..std::cmp::min(20, params.token.len())]
-    );
-
-    let file_path = match verify_token_and_get_path(&state.config.secret_key, &params.token).await {
-        Ok(path) => path,
-        Err(e) => {
-            warn!("Token verification failed: {}", e);
-            return Err(StatusCode::UNAUTHORIZED);
-        }
-    };
-
-    let path = PathBuf::from(&file_path);
-
-    if !path.exists() {
-        warn!("File not found: {}", file_path);
-        return Err(StatusCode::NOT_FOUND);
-    }
-
-    let file = match fs::File::open(&path).await {
-        Ok(file) => file,
-        Err(e) => {
-            error!("Failed to open file {}: {}", file_path, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    let file_name = path
-        .file_name()
-        .and_then(|name| name.to_str())
-        .unwrap_or("download");
-
-    // Get file size for logging and content-length header
-    let file_size = match file.metadata().await {
-        Ok(metadata) => metadata.len(),
-        Err(e) => {
-            error!("Failed to get file metadata for {}: {}", file_path, e);
-            return Err(StatusCode::INTERNAL_SERVER_ERROR);
-        }
-    };
-
-    info!(
-        "File downloaded: '{}' ({} bytes) from path: {}",
-        file_name, file_size, file_path
-    );
-
-    let stream = ReaderStream::new(file);
-    let body = Body::from_stream(stream);
-
-    let mut response = Response::new(body);
-    let headers = response.headers_mut();
-    headers.insert(
-        header::CONTENT_TYPE,
-        HeaderValue::from_static("application/octet-stream"),
-    );
-    headers.insert(
-        header::CONTENT_DISPOSITION,
-        HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name))
-            .unwrap_or(HeaderValue::from_static("attachment")),
-    );
-    headers.insert(
-        header::CONTENT_LENGTH,
-        HeaderValue::from_str(&file_size.to_string()).unwrap_or(HeaderValue::from_static("0")),
-    );
-
-    Ok(response)
-}
-
-async fn init_config(base_url: String, port: u16) -> Result<()> {
-    let mut key_bytes = [0u8; 32];
-    rand::rng().fill_bytes(&mut key_bytes);
-
-    // Create PASETO key and convert to PASERK
-    let key = PasetoSymmetricKey::<V4, Local>::from(Key::from(key_bytes));
-    let paserk_string = key.to_paserk_string();
-
-    let config = Config {
-        base_url: base_url.clone(),
-        port,
-        secret_key: paserk_string.clone(),
-    };
-
-    if tokio::fs::try_exists("config.yaml").await.unwrap_or(false) {
-        return Err(anyhow!(
-            "config.yaml already exists. Remove it first or use a different directory."
-        ));
-    }
-
-    let config_content =
-        serde_yaml::to_string(&config).map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
-
-    fs::write("config.yaml", config_content)
-        .await
-        .map_err(|e| anyhow!("Failed to write config.yaml: {}", e))?;
-
-    info!("✅ Created config.yaml with new PASETO key");
-    info!("Base URL: {}", base_url);
-    debug!("PASERK: {}", paserk_string);
-
-    Ok(())
-}
-
-async fn run_server(config: Config) -> Result<()> {
-    let state = AppState {
-        config: config.clone(),
-    };
-
-    let app = Router::new()
-        .route("/download", get(download_handler))
-        .with_state(state);
-
-    info!("Starting server on http://0.0.0.0:{}", config.port);
-
-    let bind_address = format!("0.0.0.0:{}", config.port);
-    let listener = tokio::net::TcpListener::bind(&bind_address)
-        .await
-        .map_err(|e| anyhow!("Failed to bind to port {}: {}", config.port, e))?;
-
-    axum::serve(listener, app)
-        .await
-        .map_err(|e| anyhow!("Server error: {}", e))?;
-
-    Ok(())
+    SetPassword,
 }
 
 #[tokio::main]
 async fn main() -> Result<()> {
+    // Set default log level to info if RUST_LOG is not set
+    if std::env::var("RUST_LOG").is_err() {
+        std::env::set_var("RUST_LOG", "info");
+    }
     env_logger::init();
 
     let cli = Cli::parse();
 
     match cli.command {
         Commands::Init { base_url, port } => {
-            init_config(base_url, port).await?;
-            return Ok(());
+            if let Some(password) = init_config(base_url, port).await? {
+                let admin_enabled = std::env::var("RYANSEND_DEFAULT_ADMIN_PANEL")
+                    .map(|v| v.parse().unwrap_or(false))
+                    .unwrap_or(false);
+
+                if admin_enabled {
+                    info!("🔧 Admin panel enabled by default!");
+                    info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
+                } else {
+                    info!("🔧 Admin panel disabled by default");
+                    info!("📋 To enable: set 'enabled: true' in config.yaml admin section");
+                }
+                info!("🔑 Generated admin password: {}", password);
+                info!("📝 To change the password later:");
+                info!("   1. Run: cargo run -- set-password");
+            }
         }
         Commands::Start => {
             if !tokio::fs::try_exists("config.yaml").await.unwrap_or(false) {
@@ -286,7 +81,22 @@ async fn main() -> Result<()> {
                     .ok()
                     .and_then(|p| p.parse().ok())
                     .unwrap_or(3000);
-                init_config(base_url, port).await?;
+                if let Some(password) = init_config(base_url, port).await? {
+                    let admin_enabled = std::env::var("RYANSEND_DEFAULT_ADMIN_PANEL")
+                        .map(|v| v.parse().unwrap_or(false))
+                        .unwrap_or(false);
+
+                    if admin_enabled {
+                        info!("🔧 Admin panel enabled by default!");
+                        info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
+                    } else {
+                        info!("🔧 Admin panel disabled by default");
+                        info!("📋 To enable: set 'enabled: true' in config.yaml admin section");
+                    }
+                    info!("🔑 Generated admin password: {}", password);
+                    info!("📝 To change the password later:");
+                    info!("   1. Run: cargo run -- set-password");
+                }
             }
 
             let config = load_config().await?;
@@ -294,43 +104,62 @@ async fn main() -> Result<()> {
                 "Loaded config - base_url: {}, port: {}",
                 config.base_url, config.port
             );
-            run_server(config).await?;
+
+            // Start both main server and admin server concurrently
+            let main_server = run_server(config.clone());
+            let admin_server = run_admin_server(config.clone());
+
+            tokio::try_join!(main_server, admin_server)?;
         }
-        _ => {
+        Commands::Share { path, expires_in } => {
             let config = load_config().await?;
-            debug!(
+            log::debug!(
                 "Loaded config - base_url: {}, port: {}",
-                config.base_url, config.port
+                config.base_url,
+                config.port
             );
 
-            match cli.command {
-                Commands::Init { .. } => {
-                    unreachable!() // Already handled above
+            match generate_url(&config, &path, expires_in).await {
+                Ok(download_url) => {
+                    println!("Share URL: {}", download_url);
+                    println!("Token expires in {} seconds", expires_in);
+                    info!(
+                        "Generated share token for file: {} (expires in {}s)",
+                        path.display(),
+                        expires_in
+                    );
                 }
-                Commands::Start => {
-                    unreachable!() // Already handled above
+                Err(e) => {
+                    error!("Error generating token: {}", e);
+                    std::process::exit(1);
                 }
-                Commands::Share { path, expires_in } => {
-                    match generate_token(&config, &path, expires_in).await {
-                        Ok(token) => {
-                            let download_url = format!(
-                                "{}/download?token={}",
-                                config.base_url.trim_end_matches('/'),
-                                token
-                            );
-                            println!("Share URL: {}", download_url);
-                            println!("Token expires in {} seconds", expires_in);
-                            info!(
-                                "Generated share token for file: {} (expires in {}s)",
-                                path.display(),
-                                expires_in
-                            );
+            }
+        }
+        Commands::SetPassword => {
+            println!("Enter new admin password:");
+            match rpassword::read_password() {
+                Ok(password) => {
+                    if password.trim().is_empty() {
+                        error!("Password cannot be empty");
+                        std::process::exit(1);
+                    }
+                    if password.len() < 15 {
+                        error!("Password must be at least 15 characters long");
+                        std::process::exit(1);
+                    }
+                    match update_admin_password(&password).await {
+                        Ok(()) => {
+                            info!("Password updated successfully");
                         }
                         Err(e) => {
-                            error!("Error generating token: {}", e);
+                            error!("Error updating password: {}", e);
                             std::process::exit(1);
                         }
                     }
+                }
+                Err(e) => {
+                    error!("Error reading password: {}", e);
+                    std::process::exit(1);
                 }
             }
         }
