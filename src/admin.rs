@@ -298,7 +298,7 @@ async fn admin_files_handler(
         _ => a.name.cmp(&b.name),
     });
 
-    let show_parent = current_path != "." && current_path != "/" && current_path != "";
+    let show_parent = current_path != "." && current_path != "/" && !current_path.is_empty();
     let parent_path = if show_parent {
         let parent = path.parent().unwrap_or(&canonical_base);
         parent
