@@ -375,7 +375,7 @@ async fn perform_search(
     let mut search_results: Vec<String> = SearchBuilder::default()
         .location(current_dir.to_string_lossy().as_ref())
         .search_input(search_query)
-        .limit(10) // Max 10 results
+        .limit(500) // even if we don't return all results, we need it for the sort
         .depth(10) // Search recursively from current directory
         .ignore_case()
         .build()
@@ -383,6 +383,9 @@ async fn perform_search(
 
     // Sort by similarity using rust_search's similarity_sort
     similarity_sort(&mut search_results, search_query);
+
+    // Limit to top 50 results after sorting
+    search_results.truncate(50);
 
     let mut file_entries = Vec::new();
 
