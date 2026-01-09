@@ -1,3 +1,5 @@
+[![CircleCI](https://dl.circleci.com/status-badge/img/gh/rlittlefield/ryansend/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/rlittlefield/ryansend/tree/main)
+
 # ryansend 
 
 ryansend lets you share files on your computer on a public url.
