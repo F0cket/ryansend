@@ -65,7 +65,10 @@ async fn main() -> Result<()> {
                     info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
                 } else {
                     info!("🔧 Admin panel disabled by default");
-                    info!("📋 To enable: set 'enabled: true' in config.yaml admin section");
+                    info!(
+                        "📋 To enable: set 'enabled: true' in {} admin section",
+                        config::get_config_file_path()
+                    );
                 }
                 info!("🔑 Generated admin password: {}", password);
                 info!("📝 To change the password later:");
@@ -73,7 +76,8 @@ async fn main() -> Result<()> {
             }
         }
         Commands::Start => {
-            if !tokio::fs::try_exists("config.yaml").await.unwrap_or(false) {
+            let config_path = config::get_config_file_path();
+            if !tokio::fs::try_exists(&config_path).await.unwrap_or(false) {
                 info!("Config file not found. Creating new configuration...");
                 let base_url = std::env::var("RYANSEND_BASE_URL")
                     .unwrap_or_else(|_| "http://localhost:3000".to_string());
@@ -91,7 +95,10 @@ async fn main() -> Result<()> {
                         info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
                     } else {
                         info!("🔧 Admin panel disabled by default");
-                        info!("📋 To enable: set 'enabled: true' in config.yaml admin section");
+                        info!(
+                            "📋 To enable: set 'enabled: true' in {} admin section",
+                            config::get_config_file_path()
+                        );
                     }
                     info!("🔑 Generated admin password: {}", password);
                     info!("📝 To change the password later:");

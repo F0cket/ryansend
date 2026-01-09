@@ -25,13 +25,18 @@ pub struct AdminConfig {
     pub sharing_root: String,
 }
 
+pub fn get_config_file_path() -> String {
+    std::env::var("RYANSEND_CONFIG_FILE").unwrap_or_else(|_| "config.yaml".to_string())
+}
+
 pub async fn load_config() -> Result<Config> {
-    let config_content = fs::read_to_string("config.yaml").await.map_err(|_| {
-        anyhow!("Failed to read config.yaml. Make sure it exists in the current directory")
-    })?;
+    let config_path = get_config_file_path();
+    let config_content = fs::read_to_string(&config_path)
+        .await
+        .map_err(|_| anyhow!("Failed to read {}. Make sure it exists", config_path))?;
 
     let mut config: Config = serde_yaml::from_str(&config_content)
-        .map_err(|e| anyhow!("Failed to parse config.yaml: {}", e))?;
+        .map_err(|e| anyhow!("Failed to parse {}: {}", config_path, e))?;
 
     // Set default value for remove_kofi if not present
     // The #[serde(default)] attribute handles this automatically, but this comment clarifies intent
@@ -118,20 +123,22 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         remove_kofi: false,
     };
 
-    if tokio::fs::try_exists("config.yaml").await.unwrap_or(false) {
+    let config_path = get_config_file_path();
+    if tokio::fs::try_exists(&config_path).await.unwrap_or(false) {
         return Err(anyhow!(
-            "config.yaml already exists. Remove it first or use a different directory."
+            "{} already exists. Remove it first or use a different directory.",
+            config_path
         ));
     }
 
     let config_content =
         serde_yaml::to_string(&config).map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-    fs::write("config.yaml", config_content)
+    fs::write(&config_path, config_content)
         .await
-        .map_err(|e| anyhow!("Failed to write config.yaml: {}", e))?;
+        .map_err(|e| anyhow!("Failed to write {}: {}", config_path, e))?;
 
-    log::info!("✅ Created config.yaml with new PASETO key");
+    log::info!("✅ Created {} with new PASETO key", config_path);
     log::info!("Base URL: {}", base_url);
     log::debug!("PASERK: {}", paserk_string);
 
@@ -156,7 +163,10 @@ pub async fn update_admin_password(new_password: &str) -> Result<()> {
             admin.password = password_hash;
         }
         None => {
-            return Err(anyhow!("Admin configuration not found in config.yaml"));
+            return Err(anyhow!(
+                "Admin configuration not found in {}",
+                get_config_file_path()
+            ));
         }
     }
 
@@ -164,9 +174,10 @@ pub async fn update_admin_password(new_password: &str) -> Result<()> {
     let config_content =
         serde_yaml::to_string(&config).map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
 
-    fs::write("config.yaml", config_content)
+    let config_path = get_config_file_path();
+    fs::write(&config_path, config_content)
         .await
-        .map_err(|e| anyhow!("Failed to write updated config.yaml: {}", e))?;
+        .map_err(|e| anyhow!("Failed to write updated {}: {}", config_path, e))?;
 
     log::info!("✅ Admin password updated successfully");
 
