@@ -1,4 +1,5 @@
 [![CircleCI](https://dl.circleci.com/status-badge/img/gh/rlittlefield/ryansend/tree/main.svg?style=svg)](https://dl.circleci.com/status-badge/redirect/gh/rlittlefield/ryansend/tree/main)
+[![DockerHub](https://img.shields.io/docker/v/ryanlittlefield/ryansend/latest)](https://hub.docker.com/r/ryanlittlefield/ryansend)
 
 # ryansend 
 
