@@ -61,3 +61,17 @@ docker run -d --name ryansend -p 3000:3000 -p 3001:3001 -v /mnt/user/appdata/rya
 ```
 
 This example works great on unraid, but should work in many docker setups. It will set up two mounts to the host: the appdata one so your config.yaml persists even if you upgrade the image later, and the /mnt/user as the root shared directory. You will probably want to adjust that to something like `/mnt/user/media` or something if you don't really want the admin interface to be bothered with data from random other apps.
+
+## Contributing
+
+We welcome contributions from the community! To contribute to ryansend, please:
+
+1. **Sign off your commits** - This project uses the [Developer Certificate of Origin (DCO)](DCO) to ensure proper licensing of contributions
+2. **Use `git commit -s`** to automatically add your sign-off line
+3. **Follow the guidelines** in [CONTRIBUTING.md](CONTRIBUTING.md)
+
+All contributions must include a `Signed-off-by` line to certify that you have the right to submit your changes under the project's MIT license.
+
+## License
+
+This project is licensed under the [MIT License](LICENSE).

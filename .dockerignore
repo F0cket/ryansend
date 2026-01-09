@@ -40,3 +40,6 @@ Dockerfile
 # Environment files
 .env
 .env.local
+
+# Generated license files (regenerated in Docker)
+licenses.html

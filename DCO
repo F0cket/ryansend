@@ -1,0 +1,9 @@
+# Developer Sign-off
+
+By adding a `Signed-off-by` line to your commits, you certify that:
+
+1. You wrote the contribution or have the right to submit it under the MIT License
+2. You understand the contribution will be public and distributed under the MIT License
+3. You're okay with your name and email being included in the project history
+
+That's it! Just use `git commit -s` and you're good to go.
