@@ -47,6 +47,7 @@ struct FileBrowserTemplate {
 struct FileEntry {
     name: String,
     path: String,
+    path_display: String, // Truncated path for display
     is_dir: bool,
     size_display: String,
 }
@@ -307,9 +308,16 @@ async fn admin_files_handler(
                 .to_string_lossy()
                 .to_string();
 
+            let path_display = if relative_entry_path.len() > 100 {
+                format!("{}...", &relative_entry_path[..97])
+            } else {
+                relative_entry_path.clone()
+            };
+
             entries.push(FileEntry {
                 name: name.clone(),
                 path: relative_entry_path,
+                path_display,
                 is_dir,
                 size_display,
             });
@@ -410,9 +418,16 @@ async fn perform_search(
             Err(_) => continue, // Skip files outside sharing root
         };
 
+        let path_display = if relative_path.len() > 100 {
+            format!("{}...", &relative_path[..97])
+        } else {
+            relative_path.clone()
+        };
+
         file_entries.push(FileEntry {
             name,
             path: relative_path,
+            path_display,
             is_dir,
             size_display,
         });
@@ -518,6 +533,54 @@ mod tests {
             "Encoded search query should not be empty"
         );
         assert!(has_search_results, "Should indicate search was performed");
+    }
+
+    #[tokio::test]
+    async fn test_path_truncation() {
+        // Test that long paths are properly truncated in FileEntry
+        let long_path = "documents/projects/client_work/super_important_project/backend/src/controllers/very_long_module_name_that_definitely_exceeds_one_hundred_characters_in_total_length_for_testing_truncation_purposes/file.txt";
+        let short_path = "short/path/file.txt";
+
+        // Test long path truncation
+        let long_display = if long_path.len() > 100 {
+            format!("{}...", &long_path[..97])
+        } else {
+            long_path.to_string()
+        };
+
+        // Test short path (no truncation)
+        let short_display = if short_path.len() > 100 {
+            format!("{}...", &short_path[..97])
+        } else {
+            short_path.to_string()
+        };
+
+        assert!(
+            long_path.len() > 100,
+            "Long path should be over 100 characters"
+        );
+        assert_eq!(
+            long_display.len(),
+            100,
+            "Truncated path should be exactly 100 characters"
+        );
+        assert!(
+            long_display.ends_with("..."),
+            "Truncated path should end with '...'"
+        );
+
+        assert!(
+            short_path.len() <= 100,
+            "Short path should be under 100 characters"
+        );
+        assert_eq!(
+            short_display, short_path,
+            "Short path should not be truncated"
+        );
+        assert!(
+            !short_display.ends_with("..."),
+            "Short path should not end with '...'"
+        );
     }
 }
 

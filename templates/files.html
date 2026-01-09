@@ -192,6 +192,17 @@
                 font-size: 1.1rem;
                 border-bottom: 1px solid #dee2e6;
             }
+            .file-path {
+                color: #6c757d;
+                font-size: 0.8rem;
+                margin-left: 8px;
+                font-style: italic;
+            }
+            .file-name-with-path {
+                display: flex;
+                align-items: center;
+                flex-wrap: wrap;
+            }
         </style>
     </head>
     <body>
@@ -246,17 +257,18 @@
                     {% for entry in search_results %}
                     <tr>
                         <td class="file-name">
-                            {% if entry.is_dir %}
-                            <span class="file-icon">📁</span>
-                            <a
-                                href="/admin/files?path={{ entry.path }}{% if !search_query.is_empty() %}&search={{ search_query_encoded }}{% endif %}"
-                                class="directory"
-                                >{{ entry.name }}</a
-                            >
-                            {% else %}
-                            <span class="file-icon">📄</span>
-                            <span>{{ entry.name }}</span>
-                            {% endif %}
+                            <div class="file-name-with-path">
+                                <span class="file-icon">📄</span>
+                                <span title="{{ entry.path }}"
+                                    >{{ entry.name }}</span
+                                >
+                                <span
+                                    class="file-path"
+                                    title="{{ entry.path }}"
+                                >
+                                    {{ entry.path_display }}
+                                </span>
+                            </div>
                         </td>
                         <td class="file-size">
                             {% if entry.is_dir %} - {% else %} {{
