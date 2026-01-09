@@ -25,27 +25,25 @@ RUN cargo about generate about.hbs > licenses.html
 # Runtime stage - using Debian slim for glibc compatibility
 FROM debian:bookworm-slim
 
-# Install CA certificates and create app user
+# Install CA certificates and gosu for user switching
 RUN apt-get update && \
-    apt-get install -y ca-certificates && \
-    rm -rf /var/lib/apt/lists/* && \
-    useradd -m -u 1000 appuser
+    apt-get install -y ca-certificates gosu && \
+    rm -rf /var/lib/apt/lists/*
 
-# Copy the binary and license files from builder stage
+# Copy the binary, entrypoint script, and license files from builder stage
 COPY --from=builder /usr/src/app/target/release/ryansend /usr/local/bin/ryansend
+COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 # Create dedicated directory for license files to avoid conflicts with user mounts
 RUN mkdir -p /ryansend
 COPY --from=builder /usr/src/app/licenses.html /ryansend/licenses.html
 COPY LICENSE /ryansend/LICENSE
 COPY DCO /ryansend/DCO
+COPY CONTRIBUTING.md /ryansend/CONTRIBUTING.md
 
-# Make binary executable and create working directory
+# Make binary and entrypoint executable and create working directory
 RUN chmod +x /usr/local/bin/ryansend && \
-    mkdir -p /app && \
-    chown appuser:appuser /app
-
-# Switch to non-root user
-USER appuser
+    chmod +x /usr/local/bin/docker-entrypoint.sh && \
+    mkdir -p /app
 WORKDIR /app
 
 # Expose the default port
@@ -57,5 +55,6 @@ EXPOSE 3000
 # /ryansend/DCO - Developer Certificate of Origin
 # /ryansend/CONTRIBUTING.md - Contribution guidelines
 
-# Default command - will auto-init if no config exists
-CMD ["ryansend", "start"]
+# Set entrypoint and default command
+ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]
+CMD ["start"]
