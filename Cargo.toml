@@ -6,7 +6,7 @@ license = "MIT OR Apache-2.0"
 
 [dependencies]
 axum = "0.7"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "fs", "net"] }
+tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "fs", "net", "io-util"] }
 rusty_paseto = { version = "0.9", features = ["paserk"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"

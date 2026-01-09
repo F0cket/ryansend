@@ -4,6 +4,53 @@ use axum::{
     http::StatusCode,
     response::{Html, IntoResponse, Response},
 };
+use log::error;
+
+// Custom error type that wraps anyhow::Error and implements IntoResponse
+pub struct AppError {
+    inner: anyhow::Error,
+    status: StatusCode,
+}
+
+impl AppError {
+    pub fn new(status: StatusCode, error: anyhow::Error) -> Self {
+        Self {
+            inner: error,
+            status,
+        }
+    }
+
+    pub fn not_found(error: anyhow::Error) -> Self {
+        Self::new(StatusCode::NOT_FOUND, error)
+    }
+
+    pub fn internal_server_error(error: anyhow::Error) -> Self {
+        Self::new(StatusCode::INTERNAL_SERVER_ERROR, error)
+    }
+}
+
+impl IntoResponse for AppError {
+    fn into_response(self) -> Response {
+        error!("Application error ({}): {:?}", self.status, self.inner);
+
+        // For security, we don't expose internal error details to clients
+        // Instead, we return appropriate error pages based on status
+        make_error_response(self.status)
+    }
+}
+
+// This enables using `?` on functions that return `Result<T, anyhow::Error>`
+// Default to 500 Internal Server Error for generic errors
+impl<E> From<E> for AppError
+where
+    E: Into<anyhow::Error>,
+{
+    fn from(err: E) -> Self {
+        Self::internal_server_error(err.into())
+    }
+}
+
+pub type AppResult<T> = Result<T, AppError>;
 
 #[derive(Template)]
 #[template(path = "error_404.html")]
@@ -40,7 +87,13 @@ pub fn make_error_response(status: StatusCode) -> Response {
                 .status(StatusCode::NOT_FOUND)
                 .header("content-type", "text/html")
                 .body(Body::from(html))
-                .expect("Failed to build 404 error response")
+                .unwrap_or_else(|_| {
+                    error!("Failed to build 404 error response");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap_or_default()
+                })
         }
         StatusCode::UNAUTHORIZED => {
             let template = Error401GeneralTemplate;
@@ -51,7 +104,13 @@ pub fn make_error_response(status: StatusCode) -> Response {
                 .status(StatusCode::UNAUTHORIZED)
                 .header("content-type", "text/html")
                 .body(Body::from(html))
-                .expect("Failed to build 401 unauthorized error response")
+                .unwrap_or_else(|_| {
+                    error!("Failed to build 401 unauthorized error response");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap_or_default()
+                })
         }
         StatusCode::FORBIDDEN => {
             let template = Error401GeneralTemplate;
@@ -62,7 +121,13 @@ pub fn make_error_response(status: StatusCode) -> Response {
                 .status(StatusCode::FORBIDDEN)
                 .header("content-type", "text/html")
                 .body(Body::from(html))
-                .expect("Failed to build 403 forbidden error response")
+                .unwrap_or_else(|_| {
+                    error!("Failed to build 403 forbidden error response");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap_or_default()
+                })
         }
         StatusCode::INTERNAL_SERVER_ERROR => {
             let template = Error500Template;
@@ -73,12 +138,24 @@ pub fn make_error_response(status: StatusCode) -> Response {
                 .status(StatusCode::INTERNAL_SERVER_ERROR)
                 .header("content-type", "text/html")
                 .body(Body::from(html))
-                .expect("Failed to build 500 internal server error response")
+                .unwrap_or_else(|_| {
+                    error!("Failed to build 500 internal server error response");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap_or_default()
+                })
         }
         _ => Response::builder()
             .status(status)
             .body(Body::empty())
-            .expect("Failed to build fallback error response"),
+            .unwrap_or_else(|_| {
+                error!("Failed to build fallback error response");
+                Response::builder()
+                    .status(StatusCode::INTERNAL_SERVER_ERROR)
+                    .body(Body::from("Internal Server Error"))
+                    .unwrap_or_default()
+            }),
     }
 }
 
@@ -93,7 +170,13 @@ pub fn make_admin_error_response(status: StatusCode) -> Response {
                 .status(StatusCode::UNAUTHORIZED)
                 .header("content-type", "text/html")
                 .body(Body::from(html))
-                .expect("Failed to build admin unauthorized error response")
+                .unwrap_or_else(|_| {
+                    error!("Failed to build admin unauthorized error response");
+                    Response::builder()
+                        .status(StatusCode::INTERNAL_SERVER_ERROR)
+                        .body(Body::from("Internal Server Error"))
+                        .unwrap_or_default()
+                })
         }
         _ => make_error_response(status), // Use general error for other statuses
     }
