@@ -16,11 +16,26 @@ ryansend has a single executable file, that runs in two modes:
 
 `ryansend start` turns on a webserver. A single URL prefix is exposed on port 3000, matching the URLs generated from `ryansend share`. Files are streamed both off disk and out the network, keeping the process from running out of memory under normal usage.
 
+## What is this for?
+
+* You want something free (doesn't even cost money to disable the ko-fi link)
+* You need something that can send 80gb files
+* If you are running a home server and want to share files directly
+* You don't want your friends needing special software or accounts or VPNs
+* You want to send specific files but don't want to permanently host them publicly
+* You need something simple and low footprint
+  * ryansend docker image is ~32MB compressed
+  * executable binary is ~6MB
+  * idles at 0% CPU and 8MB of memory usage when nobody is using it
+* Doesn't need javascript in the browser so the page renders fast
+* The only external request made is for the ko-fi image link in the admin page, which can be turned off.
 
 
 ## Setup and config
 
 You can just run `ryansend start`, and assuming you run with adequate permissions, ryansend will generate a new config.yaml file with a default base localhost url and a new randomly generated encryption key. You will probably want to then modify the config file and change `base_url` to your IP address or DNS. Ryansend is made for home users, so the best option is to set up DDNS, then forwarding a port in your router to point to whatever local IP ryansend is running on.
+
+If you want to disable the ko-fi link, just set `remove_kofi: false` in the config.yaml.
 
 ### Docker
 
