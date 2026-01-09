@@ -436,154 +436,6 @@ async fn perform_search(
     file_entries
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::fs;
-    use tempfile::TempDir;
-
-    #[tokio::test]
-    async fn test_search_functionality() {
-        // Create a temporary directory with test files
-        let temp_dir = TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-
-        // Create test files
-        fs::write(temp_path.join("test_file.txt"), "test content").unwrap();
-        fs::write(temp_path.join("another_file.rs"), "rust code").unwrap();
-        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
-
-        // Create subdirectory with file
-        let sub_dir = temp_path.join("subdir");
-        fs::create_dir(&sub_dir).unwrap();
-        fs::write(sub_dir.join("nested_file.log"), "log content").unwrap();
-
-        let canonical_base = temp_path.canonicalize().unwrap();
-
-        // Test search for "file" in root directory - should find files but not nested ones
-        let results = perform_search(&canonical_base, "file", &canonical_base).await;
-        assert!(!results.is_empty(), "Search should find files");
-        // Should find files in root directory and subdirectories
-        assert_eq!(
-            results.len(),
-            3,
-            "Should find 3 files starting from root directory"
-        );
-
-        // Test search for "nested" in root directory - should find nested file in subdirectory
-        let nested_results = perform_search(&canonical_base, "nested", &canonical_base).await;
-        assert!(
-            !nested_results.is_empty(),
-            "Search should find nested files when starting from root"
-        );
-
-        // Test search for "nested" in subdirectory - should only find the nested file
-        let subdir_path = canonical_base.join("subdir");
-        let nested_in_subdir = perform_search(&subdir_path, "nested", &canonical_base).await;
-        assert_eq!(
-            nested_in_subdir.len(),
-            1,
-            "Search should find exactly 1 nested file when starting from subdir"
-        );
-
-        // Test search for "test"
-        let test_results = perform_search(&canonical_base, "test", &canonical_base).await;
-        assert!(!test_results.is_empty(), "Search should find test files");
-
-        // Test search for non-existent term
-        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
-        assert!(
-            empty_results.is_empty(),
-            "Search should return empty for non-existent terms"
-        );
-    }
-
-    #[tokio::test]
-    async fn test_search_no_results_message() {
-        // Create a temporary directory with test files
-        let temp_dir = TempDir::new().unwrap();
-        let temp_path = temp_dir.path();
-
-        // Create only files that won't match our search
-        fs::write(temp_path.join("document.txt"), "content").unwrap();
-        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
-
-        let canonical_base = temp_path.canonicalize().unwrap();
-
-        // Search for something that won't be found
-        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
-
-        // Verify no results
-        assert!(empty_results.is_empty(), "Should find no results");
-
-        // Test that we can distinguish between no search and empty search results
-        // This verifies the template will show the "no results" message correctly
-        let search_query = "nonexistent".to_string();
-        let search_query_encoded = encode(&search_query).to_string();
-        let has_search_results = true; // Search was performed
-
-        // This simulates what the template receives:
-        // - has_search_results = true (search was performed)
-        // - search_results.is_empty() = true (no results found)
-        // - search_query contains the search term
-        // - search_query_encoded contains the URL-encoded search term
-        assert!(!search_query.is_empty(), "Search query should not be empty");
-        assert!(
-            !search_query_encoded.is_empty(),
-            "Encoded search query should not be empty"
-        );
-        assert!(has_search_results, "Should indicate search was performed");
-    }
-
-    #[tokio::test]
-    async fn test_path_truncation() {
-        // Test that long paths are properly truncated in FileEntry
-        let long_path = "documents/projects/client_work/super_important_project/backend/src/controllers/very_long_module_name_that_definitely_exceeds_one_hundred_characters_in_total_length_for_testing_truncation_purposes/file.txt";
-        let short_path = "short/path/file.txt";
-
-        // Test long path truncation
-        let long_display = if long_path.len() > 100 {
-            format!("{}...", &long_path[..97])
-        } else {
-            long_path.to_string()
-        };
-
-        // Test short path (no truncation)
-        let short_display = if short_path.len() > 100 {
-            format!("{}...", &short_path[..97])
-        } else {
-            short_path.to_string()
-        };
-
-        assert!(
-            long_path.len() > 100,
-            "Long path should be over 100 characters"
-        );
-        assert_eq!(
-            long_display.len(),
-            100,
-            "Truncated path should be exactly 100 characters"
-        );
-        assert!(
-            long_display.ends_with("..."),
-            "Truncated path should end with '...'"
-        );
-
-        assert!(
-            short_path.len() <= 100,
-            "Short path should be under 100 characters"
-        );
-        assert_eq!(
-            short_display, short_path,
-            "Short path should not be truncated"
-        );
-        assert!(
-            !short_display.ends_with("..."),
-            "Short path should not end with '...'"
-        );
-    }
-}
-
 async fn admin_download_handler(
     State(state): State<AppState>,
     Query(query): Query<AdminDownloadQuery>,
@@ -755,4 +607,152 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         .map_err(|e| anyhow::anyhow!("Admin server error: {}", e))?;
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_search_functionality() {
+        // Create a temporary directory with test files
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create test files
+        fs::write(temp_path.join("test_file.txt"), "test content").unwrap();
+        fs::write(temp_path.join("another_file.rs"), "rust code").unwrap();
+        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+
+        // Create subdirectory with file
+        let sub_dir = temp_path.join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+        fs::write(sub_dir.join("nested_file.log"), "log content").unwrap();
+
+        let canonical_base = temp_path.canonicalize().unwrap();
+
+        // Test search for "file" in root directory - should find files but not nested ones
+        let results = perform_search(&canonical_base, "file", &canonical_base).await;
+        assert!(!results.is_empty(), "Search should find files");
+        // Should find files in root directory and subdirectories
+        assert_eq!(
+            results.len(),
+            3,
+            "Should find 3 files starting from root directory"
+        );
+
+        // Test search for "nested" in root directory - should find nested file in subdirectory
+        let nested_results = perform_search(&canonical_base, "nested", &canonical_base).await;
+        assert!(
+            !nested_results.is_empty(),
+            "Search should find nested files when starting from root"
+        );
+
+        // Test search for "nested" in subdirectory - should only find the nested file
+        let subdir_path = canonical_base.join("subdir");
+        let nested_in_subdir = perform_search(&subdir_path, "nested", &canonical_base).await;
+        assert_eq!(
+            nested_in_subdir.len(),
+            1,
+            "Search should find exactly 1 nested file when starting from subdir"
+        );
+
+        // Test search for "test"
+        let test_results = perform_search(&canonical_base, "test", &canonical_base).await;
+        assert!(!test_results.is_empty(), "Search should find test files");
+
+        // Test search for non-existent term
+        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+        assert!(
+            empty_results.is_empty(),
+            "Search should return empty for non-existent terms"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_no_results_message() {
+        // Create a temporary directory with test files
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create only files that won't match our search
+        fs::write(temp_path.join("document.txt"), "content").unwrap();
+        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+
+        let canonical_base = temp_path.canonicalize().unwrap();
+
+        // Search for something that won't be found
+        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+
+        // Verify no results
+        assert!(empty_results.is_empty(), "Should find no results");
+
+        // Test that we can distinguish between no search and empty search results
+        // This verifies the template will show the "no results" message correctly
+        let search_query = "nonexistent".to_string();
+        let search_query_encoded = encode(&search_query).to_string();
+        let has_search_results = true; // Search was performed
+
+        // This simulates what the template receives:
+        // - has_search_results = true (search was performed)
+        // - search_results.is_empty() = true (no results found)
+        // - search_query contains the search term
+        // - search_query_encoded contains the URL-encoded search term
+        assert!(!search_query.is_empty(), "Search query should not be empty");
+        assert!(
+            !search_query_encoded.is_empty(),
+            "Encoded search query should not be empty"
+        );
+        assert!(has_search_results, "Should indicate search was performed");
+    }
+
+    #[tokio::test]
+    async fn test_path_truncation() {
+        // Test that long paths are properly truncated in FileEntry
+        let long_path = "documents/projects/client_work/super_important_project/backend/src/controllers/very_long_module_name_that_definitely_exceeds_one_hundred_characters_in_total_length_for_testing_truncation_purposes/file.txt";
+        let short_path = "short/path/file.txt";
+
+        // Test long path truncation
+        let long_display = if long_path.len() > 100 {
+            format!("{}...", &long_path[..97])
+        } else {
+            long_path.to_string()
+        };
+
+        // Test short path (no truncation)
+        let short_display = if short_path.len() > 100 {
+            format!("{}...", &short_path[..97])
+        } else {
+            short_path.to_string()
+        };
+
+        assert!(
+            long_path.len() > 100,
+            "Long path should be over 100 characters"
+        );
+        assert_eq!(
+            long_display.len(),
+            100,
+            "Truncated path should be exactly 100 characters"
+        );
+        assert!(
+            long_display.ends_with("..."),
+            "Truncated path should end with '...'"
+        );
+
+        assert!(
+            short_path.len() <= 100,
+            "Short path should be under 100 characters"
+        );
+        assert_eq!(
+            short_display, short_path,
+            "Short path should not be truncated"
+        );
+        assert!(
+            !short_display.ends_with("..."),
+            "Short path should not end with '...'"
+        );
+    }
 }
