@@ -46,11 +46,7 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<ByteRange> {
     let range = if start_str.is_empty() {
         // Suffix range: "-500" means last 500 bytes
         if let Ok(suffix) = end_str.parse::<u64>() {
-            let start = if suffix >= file_size {
-                0
-            } else {
-                file_size - suffix
-            };
+            let start = file_size.saturating_sub(suffix);
             ByteRange {
                 start,
                 end: Some(file_size - 1),
