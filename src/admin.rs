@@ -17,6 +17,7 @@ use rusty_paseto::prelude::*;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use tokio::fs;
+use urlencoding::encode;
 
 use crate::auth::{generate_token, generate_url, verify_admin_token, AdminTokenClaims};
 use crate::config::Config;
@@ -37,6 +38,7 @@ struct FileBrowserTemplate {
     show_parent: bool,
     parent_path: String,
     search_query: String,
+    search_query_encoded: String,
     search_results: Vec<FileEntry>,
     has_search_results: bool,
 }
@@ -259,19 +261,21 @@ async fn admin_files_handler(
         .to_string();
 
     // Handle search if search query is provided
-    let (search_query_str, search_results, has_search_results) =
+
+    let (search_query_str, search_query_encoded, search_results, has_search_results) =
         if let Some(search_query) = &query.search {
             if !search_query.trim().is_empty() {
                 let results = perform_search(&path, search_query, &canonical_base).await;
+                let encoded = encode(search_query).to_string();
                 // has_search_results is true if we performed a search (regardless of results)
-                (search_query.clone(), results, true)
+                (search_query.clone(), encoded, results, true)
             } else {
                 // Empty search query - treat as no search
-                (String::new(), Vec::new(), false)
+                (String::new(), String::new(), Vec::new(), false)
             }
         } else {
             // No search parameter - no search performed
-            (String::new(), Vec::new(), false)
+            (String::new(), String::new(), Vec::new(), false)
         };
 
     let mut entries = Vec::new();
@@ -337,6 +341,7 @@ async fn admin_files_handler(
         show_parent,
         parent_path,
         search_query: search_query_str,
+        search_query_encoded,
         search_results,
         has_search_results,
     };
@@ -496,16 +501,22 @@ mod tests {
         // Verify no results
         assert!(empty_results.is_empty(), "Should find no results");
 
-        // Test the template logic for no results case
+        // Test that we can distinguish between no search and empty search results
+        // This verifies the template will show the "no results" message correctly
         let search_query = "nonexistent".to_string();
+        let search_query_encoded = encode(&search_query).to_string();
         let has_search_results = true; // Search was performed
 
         // This simulates what the template receives:
         // - has_search_results = true (search was performed)
         // - search_results.is_empty() = true (no results found)
         // - search_query contains the search term
+        // - search_query_encoded contains the URL-encoded search term
         assert!(!search_query.is_empty(), "Search query should not be empty");
-        assert!(empty_results.is_empty(), "Results should be empty");
+        assert!(
+            !search_query_encoded.is_empty(),
+            "Encoded search query should not be empty"
+        );
         assert!(has_search_results, "Should indicate search was performed");
     }
 }
