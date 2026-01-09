@@ -14,7 +14,7 @@ ryansend has a single executable file, that runs in two modes:
 
 `ryansend share` generates a unique url with a cryptographic, automatically expiring token. Just pass the path to the file you want to share. The path is embedded into the token, which has the fun property of allowing ryansend to work without a database! By default, urls expire after one hour.
 
-`ryansend start` turns on a webserver. A single URL prefix is exposed on port 3000, matching the URLs generated from `ryansend share`. Files are streamed both off disk and out the network, keeping the process from running out of memory under normal usage.
+`ryansend start` turns on a webserver. A single URL prefix is exposed on port 3000, matching the URLs generated from `ryansend share`. Files are streamed both off disk and out the network, keeping the process from running out of memory under normal usage. If you configure the admin interface, it will generate a unique password and also opens port 3001, where you can use a simple admin file sharing UI to browse, search, and generate sharing URLs.
 
 ## What is this for?
 
