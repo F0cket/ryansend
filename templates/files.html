@@ -41,6 +41,11 @@
             .logout-btn:hover {
                 background: #c82333;
             }
+            .header-actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
             .breadcrumb {
                 background: white;
                 padding: 1rem 2rem;
@@ -208,7 +213,19 @@
     <body>
         <div class="header">
             <h1>RyanSend Admin</h1>
-            <a href="/admin/logout" class="logout-btn">Logout</a>
+            <div class="header-actions">
+                {% if !remove_kofi %}
+                <a href="https://ko-fi.com/N4N71RTZ6E" target="_blank"
+                    ><img
+                        height="36"
+                        style="border: 0px; height: 36px"
+                        src="https://storage.ko-fi.com/cdn/kofi6.png?v=6"
+                        border="0"
+                        alt="Buy Me a Coffee at ko-fi.com"
+                /></a>
+                {% endif %}
+                <a href="/admin/logout" class="logout-btn">Logout</a>
+            </div>
         </div>
 
         {% if current_path != "" %}

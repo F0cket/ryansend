@@ -41,6 +41,7 @@ struct FileBrowserTemplate {
     search_query_encoded: String,
     search_results: Vec<FileEntry>,
     has_search_results: bool,
+    remove_kofi: bool,
 }
 
 #[derive(Clone)]
@@ -352,6 +353,7 @@ async fn admin_files_handler(
         search_query_encoded,
         search_results,
         has_search_results,
+        remove_kofi: state.config.remove_kofi,
     };
 
     let html = template
@@ -753,6 +755,49 @@ mod tests {
         assert!(
             !short_display.ends_with("..."),
             "Short path should not end with '...'"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_kofi_link_visibility() {
+        // Test that remove_kofi field controls Ko-fi link visibility in template
+        let template_with_kofi = FileBrowserTemplate {
+            current_path: "test".to_string(),
+            entries: vec![],
+            show_parent: false,
+            parent_path: ".".to_string(),
+            search_query: String::new(),
+            search_query_encoded: String::new(),
+            search_results: vec![],
+            has_search_results: false,
+            remove_kofi: false, // Ko-fi link should be visible
+        };
+
+        let template_without_kofi = FileBrowserTemplate {
+            current_path: "test".to_string(),
+            entries: vec![],
+            show_parent: false,
+            parent_path: ".".to_string(),
+            search_query: String::new(),
+            search_query_encoded: String::new(),
+            search_results: vec![],
+            has_search_results: false,
+            remove_kofi: true, // Ko-fi link should be hidden
+        };
+
+        let html_with_kofi = template_with_kofi.render().unwrap();
+        let html_without_kofi = template_without_kofi.render().unwrap();
+
+        // When remove_kofi is false, Ko-fi link should be present
+        assert!(
+            html_with_kofi.contains("ko-fi.com"),
+            "Ko-fi link should be present when remove_kofi is false"
+        );
+
+        // When remove_kofi is true, Ko-fi link should not be present
+        assert!(
+            !html_without_kofi.contains("ko-fi.com"),
+            "Ko-fi link should be hidden when remove_kofi is true"
         );
     }
 }

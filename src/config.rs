@@ -13,6 +13,8 @@ pub struct Config {
     pub port: u16,
     pub secret_key: String,
     pub admin: Option<AdminConfig>,
+    #[serde(default)]
+    pub remove_kofi: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -30,6 +32,9 @@ pub async fn load_config() -> Result<Config> {
 
     let mut config: Config = serde_yaml::from_str(&config_content)
         .map_err(|e| anyhow!("Failed to parse config.yaml: {}", e))?;
+
+    // Set default value for remove_kofi if not present
+    // The #[serde(default)] attribute handles this automatically, but this comment clarifies intent
 
     // Override base_url with environment variable if present
     if let Ok(env_base_url) = std::env::var("RYANSEND_BASE_URL") {
@@ -110,6 +115,7 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         port,
         secret_key: paserk_string.clone(),
         admin: Some(admin_config),
+        remove_kofi: false,
     };
 
     if tokio::fs::try_exists("config.yaml").await.unwrap_or(false) {
