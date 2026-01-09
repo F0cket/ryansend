@@ -37,8 +37,6 @@ COPY docker-entrypoint.sh /usr/local/bin/docker-entrypoint.sh
 RUN mkdir -p /ryansend
 COPY --from=builder /usr/src/app/licenses.html /ryansend/licenses.html
 COPY LICENSE /ryansend/LICENSE
-COPY DCO /ryansend/DCO
-COPY CONTRIBUTING.md /ryansend/CONTRIBUTING.md
 
 # Make binary and entrypoint executable and create working directory
 RUN chmod +x /usr/local/bin/ryansend && \
