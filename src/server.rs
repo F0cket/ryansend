@@ -252,6 +252,13 @@ pub async fn run_server(config: Config) -> Result<()> {
 
     info!("Starting server on http://0.0.0.0:{}", config.port);
 
+    // Show admin panel info if enabled
+    if let Some(admin_config) = &config.admin {
+        if admin_config.enabled {
+            info!("📋 Admin panel available at: http://localhost:{}/admin/login", admin_config.port);
+        }
+    }
+
     let bind_address = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&bind_address)
         .await

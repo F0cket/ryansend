@@ -62,7 +62,11 @@ async fn main() -> Result<()> {
 
                 if admin_enabled {
                     info!("🔧 Admin panel enabled by default!");
-                    info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
+                    let admin_port = std::env::var("RYANSEND_ADMIN_PORT")
+                        .ok()
+                        .and_then(|port_str| port_str.parse().ok())
+                        .unwrap_or(3001);
+                    info!("📋 Admin panel will be available at: http://localhost:{}/admin/login", admin_port);
                 } else {
                     info!("🔧 Admin panel disabled by default");
                     info!(
@@ -92,7 +96,11 @@ async fn main() -> Result<()> {
 
                     if admin_enabled {
                         info!("🔧 Admin panel enabled by default!");
-                        info!("📋 Admin panel will be available at: http://localhost:3001/admin/login");
+                        let admin_port = std::env::var("RYANSEND_ADMIN_PORT")
+                            .ok()
+                            .and_then(|port_str| port_str.parse().ok())
+                            .unwrap_or(3001);
+                        info!("📋 Admin panel will be available at: http://localhost:{}/admin/login", admin_port);
                     } else {
                         info!("🔧 Admin panel disabled by default");
                         info!(

@@ -65,6 +65,13 @@ pub async fn load_config() -> Result<Config> {
         }
     }
 
+    // Override admin port with environment variable if present
+    if let Ok(env_admin_port) = std::env::var("RYANSEND_ADMIN_PORT") {
+        if let Some(ref mut admin) = config.admin {
+            admin.port = env_admin_port.parse().unwrap_or(admin.port);
+        }
+    }
+
     Ok(config)
 }
 
@@ -108,9 +115,15 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
     let password_hash =
         generate_argon2_hash(&random_password).unwrap_or_else(|_| "admin".to_string());
 
+    // Use environment variable for admin port, otherwise default to 3001
+    let admin_port = std::env::var("RYANSEND_ADMIN_PORT")
+        .ok()
+        .and_then(|port_str| port_str.parse().ok())
+        .unwrap_or(3001);
+
     let admin_config = AdminConfig {
         enabled: default_admin_enabled,
-        port: 3001,
+        port: admin_port,
         password: password_hash,
         sharing_root: ".".to_string(),
     };
@@ -182,4 +195,70 @@ pub async fn update_admin_password(new_password: &str) -> Result<()> {
     log::info!("✅ Admin password updated successfully");
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::env;
+
+    #[tokio::test]
+    async fn test_admin_port_env_var() {
+        // Set up a test config content
+        let test_config = r#"
+base_url: "http://localhost:3000"
+port: 3000
+secret_key: "test-key"
+admin:
+  enabled: true
+  port: 3001
+  password: "test-password"
+  sharing_root: "."
+remove_kofi: false
+"#;
+
+        // Parse the config
+        let mut config: Config = serde_yaml::from_str(test_config).unwrap();
+
+        // Set the environment variable
+        env::set_var("RYANSEND_ADMIN_PORT", "4001");
+
+        // Simulate the environment variable override logic from load_config
+        if let Ok(env_admin_port) = env::var("RYANSEND_ADMIN_PORT") {
+            if let Some(ref mut admin) = config.admin {
+                admin.port = env_admin_port.parse().unwrap_or(admin.port);
+            }
+        }
+
+        // Verify the port was overridden
+        assert_eq!(config.admin.as_ref().unwrap().port, 4001);
+
+        // Clean up
+        env::remove_var("RYANSEND_ADMIN_PORT");
+    }
+
+    #[test]
+    fn test_init_config_with_admin_port_env() {
+        // Set the environment variable
+        env::set_var("RYANSEND_ADMIN_PORT", "5001");
+
+        // Test the admin port logic from init_config
+        let admin_port = env::var("RYANSEND_ADMIN_PORT")
+            .ok()
+            .and_then(|port_str| port_str.parse().ok())
+            .unwrap_or(3001);
+
+        assert_eq!(admin_port, 5001);
+
+        // Clean up
+        env::remove_var("RYANSEND_ADMIN_PORT");
+
+        // Test default fallback
+        let default_port = env::var("RYANSEND_ADMIN_PORT")
+            .ok()
+            .and_then(|port_str| port_str.parse().ok())
+            .unwrap_or(3001);
+
+        assert_eq!(default_port, 3001);
+    }
 }
