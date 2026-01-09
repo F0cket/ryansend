@@ -2,6 +2,9 @@
 
 ryansend lets you share files on your computer on a public url.
 
+<img width="789" height="474" alt="Screenshot 2026-01-09 at 11 41 15 AM" src="https://github.com/user-attachments/assets/107cb9ad-3786-48bc-82d9-21d3a13dd4a9" />
+
+
 ## How it works
 
 ryansend has a single executable file, that runs in two modes:
@@ -12,6 +15,8 @@ ryansend has a single executable file, that runs in two modes:
 `ryansend share` generates a unique url with a cryptographic, automatically expiring token. Just pass the path to the file you want to share. The path is embedded into the token, which has the fun property of allowing ryansend to work without a database! By default, urls expire after one hour.
 
 `ryansend start` turns on a webserver. A single URL prefix is exposed on port 3000, matching the URLs generated from `ryansend share`. Files are streamed both off disk and out the network, keeping the process from running out of memory under normal usage.
+
+
 
 ## Setup and config
 
