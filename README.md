@@ -34,6 +34,5 @@ Currently, you can't control the generation of the secret key through env vars -
 If you want to share something, ryansend needs to be able to read it. If the file isn't mounted into the container, this won't work. Use the system you are using to run docker to configure some files from the host. On raw docker or from unraid, you could do something like this:
 
 ```
-docker run -d --name ryansend -p 3000:3000 -v /mnt/user/:/shared -e RUST_LOG=info -e RYANSEND_BASE_URL=https://example.com docker.io/ryanlittlefield/ryansend:v1.0.1
+docker run -d --name ryansend -p 3000:3000 -p 3001:3001 -v /mnt/user/:/shared -e RYANSEND_ADMIN_SHARING_ROOT=/shared -e RYANSEND_DEFAULT_ADMIN_PANEL=true -e RUST_LOG=info -e RYANSEND_BASE_URL=https://example.com docker.io/ryanlittlefield/ryansend:1.3.0
 ```
-
