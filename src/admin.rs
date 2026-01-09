@@ -12,6 +12,7 @@ use axum::{
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use chrono::{Duration, Utc};
 use log::info;
+use rust_search::{similarity_sort, SearchBuilder};
 use rusty_paseto::prelude::*;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
@@ -35,6 +36,9 @@ struct FileBrowserTemplate {
     entries: Vec<FileEntry>,
     show_parent: bool,
     parent_path: String,
+    search_query: String,
+    search_results: Vec<FileEntry>,
+    has_search_results: bool,
 }
 
 #[derive(Clone)]
@@ -53,6 +57,7 @@ struct LoginForm {
 #[derive(Deserialize)]
 struct FilesQuery {
     path: Option<String>,
+    search: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -253,6 +258,22 @@ async fn admin_files_handler(
         .to_string_lossy()
         .to_string();
 
+    // Handle search if search query is provided
+    let (search_query_str, search_results, has_search_results) =
+        if let Some(search_query) = &query.search {
+            if !search_query.trim().is_empty() {
+                let results = perform_search(&path, search_query, &canonical_base).await;
+                // has_search_results is true if we performed a search (regardless of results)
+                (search_query.clone(), results, true)
+            } else {
+                // Empty search query - treat as no search
+                (String::new(), Vec::new(), false)
+            }
+        } else {
+            // No search parameter - no search performed
+            (String::new(), Vec::new(), false)
+        };
+
     let mut entries = Vec::new();
 
     if path.is_dir() {
@@ -315,6 +336,9 @@ async fn admin_files_handler(
         entries,
         show_parent,
         parent_path,
+        search_query: search_query_str,
+        search_results,
+        has_search_results,
     };
 
     let html = template
@@ -325,6 +349,165 @@ async fn admin_files_handler(
         .header("content-type", "text/html")
         .body(Body::from(html))
         .expect("Failed to build file browser response")
+}
+
+async fn perform_search(
+    current_dir: &Path,
+    search_query: &str,
+    canonical_base: &Path,
+) -> Vec<FileEntry> {
+    // Use rust_search to find files within the current directory only
+    let mut search_results: Vec<String> = SearchBuilder::default()
+        .location(current_dir.to_string_lossy().as_ref())
+        .search_input(search_query)
+        .limit(10) // Max 10 results
+        .depth(10) // Search recursively from current directory
+        .ignore_case()
+        .build()
+        .collect();
+
+    // Sort by similarity using rust_search's similarity_sort
+    similarity_sort(&mut search_results, search_query);
+
+    let mut file_entries = Vec::new();
+
+    for path_str in search_results {
+        let path = PathBuf::from(&path_str);
+
+        // Skip if we can't get metadata
+        let metadata = match std::fs::metadata(&path) {
+            Ok(meta) => meta,
+            Err(_) => continue,
+        };
+
+        let name = path
+            .file_name()
+            .unwrap_or_default()
+            .to_string_lossy()
+            .to_string();
+
+        let is_dir = metadata.is_dir();
+        let size_display = if is_dir {
+            "-".to_string()
+        } else {
+            format_file_size(metadata.len())
+        };
+
+        // Get relative path from sharing root
+        // First canonicalize the found path to handle symlinks and path differences
+        let canonical_found_path = match path.canonicalize() {
+            Ok(canonical_path) => canonical_path,
+            Err(_) => continue, // Skip files that can't be canonicalized
+        };
+
+        let relative_path = match canonical_found_path.strip_prefix(canonical_base) {
+            Ok(rel_path) => rel_path.to_string_lossy().to_string(),
+            Err(_) => continue, // Skip files outside sharing root
+        };
+
+        file_entries.push(FileEntry {
+            name,
+            path: relative_path,
+            is_dir,
+            size_display,
+        });
+    }
+
+    file_entries
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::fs;
+    use tempfile::TempDir;
+
+    #[tokio::test]
+    async fn test_search_functionality() {
+        // Create a temporary directory with test files
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create test files
+        fs::write(temp_path.join("test_file.txt"), "test content").unwrap();
+        fs::write(temp_path.join("another_file.rs"), "rust code").unwrap();
+        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+
+        // Create subdirectory with file
+        let sub_dir = temp_path.join("subdir");
+        fs::create_dir(&sub_dir).unwrap();
+        fs::write(sub_dir.join("nested_file.log"), "log content").unwrap();
+
+        let canonical_base = temp_path.canonicalize().unwrap();
+
+        // Test search for "file" in root directory - should find files but not nested ones
+        let results = perform_search(&canonical_base, "file", &canonical_base).await;
+        assert!(!results.is_empty(), "Search should find files");
+        // Should find files in root directory and subdirectories
+        assert_eq!(
+            results.len(),
+            3,
+            "Should find 3 files starting from root directory"
+        );
+
+        // Test search for "nested" in root directory - should find nested file in subdirectory
+        let nested_results = perform_search(&canonical_base, "nested", &canonical_base).await;
+        assert!(
+            !nested_results.is_empty(),
+            "Search should find nested files when starting from root"
+        );
+
+        // Test search for "nested" in subdirectory - should only find the nested file
+        let subdir_path = canonical_base.join("subdir");
+        let nested_in_subdir = perform_search(&subdir_path, "nested", &canonical_base).await;
+        assert_eq!(
+            nested_in_subdir.len(),
+            1,
+            "Search should find exactly 1 nested file when starting from subdir"
+        );
+
+        // Test search for "test"
+        let test_results = perform_search(&canonical_base, "test", &canonical_base).await;
+        assert!(!test_results.is_empty(), "Search should find test files");
+
+        // Test search for non-existent term
+        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+        assert!(
+            empty_results.is_empty(),
+            "Search should return empty for non-existent terms"
+        );
+    }
+
+    #[tokio::test]
+    async fn test_search_no_results_message() {
+        // Create a temporary directory with test files
+        let temp_dir = TempDir::new().unwrap();
+        let temp_path = temp_dir.path();
+
+        // Create only files that won't match our search
+        fs::write(temp_path.join("document.txt"), "content").unwrap();
+        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+
+        let canonical_base = temp_path.canonicalize().unwrap();
+
+        // Search for something that won't be found
+        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+
+        // Verify no results
+        assert!(empty_results.is_empty(), "Should find no results");
+
+        // Test the template logic for no results case
+        let search_query = "nonexistent".to_string();
+        let has_search_results = true; // Search was performed
+
+        // This simulates what the template receives:
+        // - has_search_results = true (search was performed)
+        // - search_results.is_empty() = true (no results found)
+        // - search_query contains the search term
+        assert!(!search_query.is_empty(), "Search query should not be empty");
+        assert!(empty_results.is_empty(), "Results should be empty");
+        assert!(has_search_results, "Should indicate search was performed");
+    }
 }
 
 async fn admin_download_handler(

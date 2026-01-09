@@ -142,6 +142,56 @@
                 color: #6f42c1;
                 font-weight: 500;
             }
+            .search-container {
+                background: white;
+                padding: 1.5rem 2rem;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                margin-bottom: 20px;
+            }
+            .search-form {
+                display: flex;
+                gap: 10px;
+                align-items: center;
+            }
+            .search-input {
+                flex: 1;
+                padding: 0.75rem;
+                border: 2px solid #dee2e6;
+                border-radius: 4px;
+                font-size: 1rem;
+            }
+            .search-input:focus {
+                outline: none;
+                border-color: #007bff;
+            }
+            .search-btn {
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 0.75rem 1.5rem;
+                border-radius: 4px;
+                font-size: 1rem;
+                cursor: pointer;
+            }
+            .search-btn:hover {
+                background: #0056b3;
+            }
+            .search-results {
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                overflow: hidden;
+                margin-bottom: 20px;
+            }
+            .search-results h3 {
+                background: #f8f9fa;
+                margin: 0;
+                padding: 1rem 2rem;
+                color: #495057;
+                font-size: 1.1rem;
+                border-bottom: 1px solid #dee2e6;
+            }
         </style>
     </head>
     <body>
@@ -153,6 +203,83 @@
         <div class="breadcrumb">
             <div class="breadcrumb-path">Current Path: {{ current_path }}</div>
         </div>
+
+        <div class="search-container">
+            <form class="search-form" method="get">
+                <input type="hidden" name="path" value="{{ current_path }}" />
+                <input
+                    type="text"
+                    name="search"
+                    class="search-input"
+                    placeholder="Search files and directories in current folder..."
+                    value="{{ search_query }}"
+                    autofocus
+                />
+                <button type="submit" class="search-btn">Search</button>
+            </form>
+        </div>
+
+        {% if has_search_results %}
+        <div class="search-results">
+            {% if search_results.len() > 0 %}
+            <h3>Search Results ({{ search_results.len() }} found)</h3>
+            <table>
+                <thead>
+                    <tr>
+                        <th>Name</th>
+                        <th>Size</th>
+                        <th>Actions</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for entry in search_results %}
+                    <tr>
+                        <td class="file-name">
+                            {% if entry.is_dir %}
+                            <span class="file-icon">📁</span>
+                            <a
+                                href="/admin/files?path={{ entry.path }}"
+                                class="directory"
+                                >{{ entry.name }}</a
+                            >
+                            {% else %}
+                            <span class="file-icon">📄</span>
+                            <span>{{ entry.name }}</span>
+                            {% endif %}
+                        </td>
+                        <td class="file-size">
+                            {% if entry.is_dir %} - {% else %} {{
+                            entry.size_display }} {% endif %}
+                        </td>
+                        <td>
+                            {% if !entry.is_dir %}
+                            <div class="actions">
+                                <a
+                                    href="/admin/download?path={{ entry.path }}"
+                                    class="btn btn-download"
+                                    >Download</a
+                                >
+                                <a
+                                    href="/admin/share?path={{ entry.path }}"
+                                    class="btn btn-share"
+                                    >Share</a
+                                >
+                            </div>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+            {% else %}
+            <h3>Search Results</h3>
+            <div style="padding: 2rem; text-align: center; color: #6c757d">
+                No files or directories found matching "{{ search_query }}" in
+                the current folder.
+            </div>
+            {% endif %}
+        </div>
+        {% endif %}
 
         <div class="file-browser">
             <table>
