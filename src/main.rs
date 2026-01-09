@@ -66,7 +66,10 @@ async fn main() -> Result<()> {
                         .ok()
                         .and_then(|port_str| port_str.parse().ok())
                         .unwrap_or(3001);
-                    info!("📋 Admin panel will be available at: http://localhost:{}/admin/login", admin_port);
+                    info!(
+                        "📋 Admin panel will be available at: http://localhost:{}/admin/login",
+                        admin_port
+                    );
                 } else {
                     info!("🔧 Admin panel disabled by default");
                     info!(
@@ -100,7 +103,10 @@ async fn main() -> Result<()> {
                             .ok()
                             .and_then(|port_str| port_str.parse().ok())
                             .unwrap_or(3001);
-                        info!("📋 Admin panel will be available at: http://localhost:{}/admin/login", admin_port);
+                        info!(
+                            "📋 Admin panel will be available at: http://localhost:{}/admin/login",
+                            admin_port
+                        );
                     } else {
                         info!("🔧 Admin panel disabled by default");
                         info!(

@@ -255,7 +255,10 @@ pub async fn run_server(config: Config) -> Result<()> {
     // Show admin panel info if enabled
     if let Some(admin_config) = &config.admin {
         if admin_config.enabled {
-            info!("📋 Admin panel available at: http://localhost:{}/admin/login", admin_config.port);
+            info!(
+                "📋 Admin panel available at: http://localhost:{}/admin/login",
+                admin_config.port
+            );
         }
     }
 
