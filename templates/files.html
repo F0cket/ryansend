@@ -211,9 +211,11 @@
             <a href="/admin/logout" class="logout-btn">Logout</a>
         </div>
 
+        {% if current_path != "" %}
         <div class="breadcrumb">
             <div class="breadcrumb-path">Current Path: {{ current_path }}</div>
         </div>
+        {% endif %}
 
         <div class="search-container">
             <form class="search-form" method="get">
