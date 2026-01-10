@@ -50,8 +50,7 @@ EXPOSE 3000
 # License and contribution files are available at:
 # /ryansend/LICENSE - Project license (MIT)
 # /ryansend/licenses.html - All dependency licenses
-# /ryansend/DCO - Developer Certificate of Origin
-# /ryansend/CONTRIBUTING.md - Contribution guidelines
+
 
 # Set entrypoint and default command
 ENTRYPOINT ["/usr/local/bin/docker-entrypoint.sh"]

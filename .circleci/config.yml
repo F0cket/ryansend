@@ -168,7 +168,7 @@ jobs:
 
       - save_audit_db_cache
 
-  build-and-push-docker:
+  build-amd64-docker:
     docker:
       - image: cimg/base:current
     resource_class: large
@@ -208,40 +208,39 @@ jobs:
           command: |
             # Enable experimental features and setup buildx
             export DOCKER_CLI_EXPERIMENTAL=enabled
-            docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
             docker buildx create --name mybuilder --driver docker-container --use
             docker buildx inspect --bootstrap
 
       - run:
-          name: Build and push multi-architecture Docker image
+          name: Build and push AMD64 Docker image
           command: |
-            # Determine tags
+            # Determine tags for AMD64
             TAGS=""
 
             # Always tag with Cargo.toml version
-            TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$CARGO_VERSION"
+            TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$CARGO_VERSION-amd64"
 
             # Tag with latest if on main branch
             if [ "$CIRCLE_BRANCH" = "main" ]; then
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:latest"
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:latest-amd64"
             fi
 
             # Tag with git tag if triggered by tag
             if [ ! -z "$CIRCLE_TAG" ]; then
               TAG_WITHOUT_V=${CIRCLE_TAG#v}
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V"
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64"
             fi
 
             # Tag with branch name for non-tag pushes (sanitized)
             if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
               # Sanitize branch name for Docker tag (replace / with -)
               SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH"
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64"
             fi
 
-            # Build and push
+            # Build and push AMD64
             docker buildx build \
-              --platform linux/amd64,linux/arm64 \
+              --platform linux/amd64 \
               --push \
               $TAGS \
               --label "org.opencontainers.image.title=ryansend" \
@@ -254,26 +253,185 @@ jobs:
               .
 
       - run:
-          name: Generate summary
+          name: Generate AMD64 summary
           command: |
-            echo "## 🚀 Docker Image Published Successfully"
+            echo "## 🚀 AMD64 Docker Image Published Successfully"
             echo ""
             echo "**Version:** $CARGO_VERSION"
             echo "**Git SHA:** $CIRCLE_SHA1"
+            echo "**Platform:** linux/amd64"
             echo "**Runner:** x86_64 (large)"
+
+  build-arm64-docker:
+    machine:
+      image: ubuntu-2404:current
+    resource_class: arm.large
+    steps:
+      - checkout
+      - extract_version
+
+      - run:
+          name: Extract tag version (if triggered by tag)
+          command: |
+            if [[ "$CIRCLE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              TAG_VERSION=${CIRCLE_TAG#v}
+              echo "export TAG_VERSION=$TAG_VERSION" >> $BASH_ENV
+              echo "Tag version: $TAG_VERSION"
+            fi
+
+      - run:
+          name: Verify version consistency
+          command: |
+            if [ ! -z "$TAG_VERSION" ]; then
+              if [ "$CARGO_VERSION" != "$TAG_VERSION" ]; then
+                echo "ERROR: Cargo.toml version ($CARGO_VERSION) does not match tag version ($TAG_VERSION)"
+                exit 1
+              fi
+              echo "✅ Version consistency verified: $CARGO_VERSION"
+            fi
+
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin
+
+      - run:
+          name: Setup Docker Buildx
+          command: |
+            # Enable experimental features and setup buildx
+            export DOCKER_CLI_EXPERIMENTAL=enabled
+            docker buildx create --name mybuilder --driver docker-container --use
+            docker buildx inspect --bootstrap
+
+      - run:
+          name: Build and push ARM64 Docker image
+          command: |
+            # Determine tags for ARM64
+            TAGS=""
+
+            # Always tag with Cargo.toml version
+            TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$CARGO_VERSION-arm64"
+
+            # Tag with latest if on main branch
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:latest-arm64"
+            fi
+
+            # Tag with git tag if triggered by tag
+            if [ ! -z "$CIRCLE_TAG" ]; then
+              TAG_WITHOUT_V=${CIRCLE_TAG#v}
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64"
+            fi
+
+            # Tag with branch name for non-tag pushes (sanitized)
+            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
+              # Sanitize branch name for Docker tag (replace / with -)
+              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
+              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64"
+            fi
+
+            # Build and push ARM64
+            docker buildx build \
+              --platform linux/arm64 \
+              --push \
+              $TAGS \
+              --label "org.opencontainers.image.title=ryansend" \
+              --label "org.opencontainers.image.description=A secure file sharing tool using PASETO tokens" \
+              --label "org.opencontainers.image.version=$CARGO_VERSION" \
+              --label "org.opencontainers.image.vendor=ryansend" \
+              --label "org.opencontainers.image.source=https://github.com/$CIRCLE_PROJECT_USERNAME/$CIRCLE_PROJECT_REPONAME" \
+              --label "org.opencontainers.image.revision=$CIRCLE_SHA1" \
+              --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+              .
+
+      - run:
+          name: Generate ARM64 summary
+          command: |
+            echo "## 🚀 ARM64 Docker Image Published Successfully"
+            echo ""
+            echo "**Version:** $CARGO_VERSION"
+            echo "**Git SHA:** $CIRCLE_SHA1"
+            echo "**Platform:** linux/arm64"
+            echo "**Runner:** arm64 (large)"
+
+  create-multiarch-manifest:
+    docker:
+      - image: cimg/base:current
+    resource_class: medium
+    steps:
+      - checkout
+      - extract_version
+
+      - run:
+          name: Extract tag version (if triggered by tag)
+          command: |
+            if [[ "$CIRCLE_TAG" =~ ^v[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+              TAG_VERSION=${CIRCLE_TAG#v}
+              echo "export TAG_VERSION=$TAG_VERSION" >> $BASH_ENV
+              echo "Tag version: $TAG_VERSION"
+            fi
+
+      - run:
+          name: Login to Docker Hub
+          command: |
+            echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin
+
+      - run:
+          name: Create and push multi-arch manifest
+          command: |
+            # Always create manifest for Cargo.toml version
+            docker manifest create $DOCKER_USERNAME/ryansend:$CARGO_VERSION \
+              $DOCKER_USERNAME/ryansend:$CARGO_VERSION-amd64 \
+              $DOCKER_USERNAME/ryansend:$CARGO_VERSION-arm64
+            docker manifest push $DOCKER_USERNAME/ryansend:$CARGO_VERSION
+
+            # Create latest manifest if on main branch
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker manifest create $DOCKER_USERNAME/ryansend:latest \
+                $DOCKER_USERNAME/ryansend:latest-amd64 \
+                $DOCKER_USERNAME/ryansend:latest-arm64
+              docker manifest push $DOCKER_USERNAME/ryansend:latest
+            fi
+
+            # Create tag manifest if triggered by tag
+            if [ ! -z "$CIRCLE_TAG" ]; then
+              TAG_WITHOUT_V=${CIRCLE_TAG#v}
+              docker manifest create $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V \
+                $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64 \
+                $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64
+              docker manifest push $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V
+            fi
+
+            # Create branch manifest for non-tag pushes (sanitized)
+            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
+              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
+              docker manifest create $DOCKER_USERNAME/ryansend:$SAFE_BRANCH \
+                $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64 \
+                $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64
+              docker manifest push $DOCKER_USERNAME/ryansend:$SAFE_BRANCH
+            fi
+
+      - run:
+          name: Generate final summary
+          command: |
+            echo "## 🚀 Multi-Architecture Docker Images Published Successfully"
+            echo ""
+            echo "**Version:** $CARGO_VERSION"
+            echo "**Git SHA:** $CIRCLE_SHA1"
+            echo "**Platforms:** linux/amd64, linux/arm64"
             echo ""
             echo "**Published Images:**"
-            echo "- $DOCKER_USERNAME/ryansend:$CARGO_VERSION"
+            echo "- $DOCKER_USERNAME/ryansend:$CARGO_VERSION (multi-arch)"
             if [ "$CIRCLE_BRANCH" = "main" ]; then
-              echo "- $DOCKER_USERNAME/ryansend:latest"
+              echo "- $DOCKER_USERNAME/ryansend:latest (multi-arch)"
             fi
             if [ ! -z "$CIRCLE_TAG" ]; then
               TAG_WITHOUT_V=${CIRCLE_TAG#v}
-              echo "- $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V"
+              echo "- $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V (multi-arch)"
             fi
             if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
               SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
-              echo "- $DOCKER_USERNAME/ryansend:$SAFE_BRANCH"
+              echo "- $DOCKER_USERNAME/ryansend:$SAFE_BRANCH (multi-arch)"
             fi
             echo ""
             echo "**Pull Commands:**"
@@ -325,9 +483,30 @@ workflows:
   # Docker publish workflow (runs on version tags)
   docker-publish:
     jobs:
-      - build-and-push-docker:
+      - build-amd64-docker:
           context:
             - docker-hub-creds
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+$/
+
+      - build-arm64-docker:
+          context:
+            - docker-hub-creds
+          filters:
+            branches:
+              ignore: /.*/
+            tags:
+              only: /^v\d+\.\d+\.\d+$/
+
+      - create-multiarch-manifest:
+          context:
+            - docker-hub-creds
+          requires:
+            - build-amd64-docker
+            - build-arm64-docker
           filters:
             branches:
               ignore: /.*/
@@ -345,11 +524,34 @@ workflows:
                 - main
                 - develop
 
-      - build-and-push-docker:
+      - build-amd64-docker:
           context:
             - docker-hub-creds
           requires:
             - hold-for-approval
+          filters:
+            branches:
+              only:
+                - main
+                - develop
+
+      - build-arm64-docker:
+          context:
+            - docker-hub-creds
+          requires:
+            - hold-for-approval
+          filters:
+            branches:
+              only:
+                - main
+                - develop
+
+      - create-multiarch-manifest:
+          context:
+            - docker-hub-creds
+          requires:
+            - build-amd64-docker
+            - build-arm64-docker
           filters:
             branches:
               only:
