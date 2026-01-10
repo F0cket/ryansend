@@ -1379,7 +1379,7 @@ dependencies = [
 
 [[package]]
 name = "ryansend"
-version = "1.4.0"
+version = "1.4.2"
 dependencies = [
  "anyhow",
  "argon2",

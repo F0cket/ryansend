@@ -9,7 +9,7 @@
   <Privileged>false</Privileged>
   <Support>https://github.com/rlittlefield/ryansend/issues</Support>
   <Project>https://github.com/rlittlefield/ryansend</Project>
-  <Overview>ryansend lets you share files on your computer via public URLs with cryptographic tokens that automatically expire. Perfect for sharing large files directly from your home server without needing special software, accounts, or VPNs.&#xD;
+  <Overview>ryansend lets you share files on your computer via public download URLs with cryptographic tokens that automatically expire. Perfect for sharing large files directly from your home server without needing special software, accounts, or VPNs.&#xD;
 &#xD;
 Features:&#xD;
 • Share large files (tested with over 70GB)&#xD;
@@ -22,7 +22,7 @@ Features:&#xD;
 &#xD;
 The admin panel (if enabled) will be available at http://[IP]:[PORT:3001]/admin/login with a randomly generated password shown in the container logs.</Overview>
   <Category>Network:Other Productivity:</Category>
-  <WebUI>http://[IP]:[PORT:3000]/</WebUI>
+  <WebUI>http://[IP]:[PORT:3001]/</WebUI>
   <TemplateURL>https://raw.githubusercontent.com/rlittlefield/ryansend/main/unraid/ryansend.xml</TemplateURL>
 
   <ExtraParams/>
