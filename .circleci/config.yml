@@ -238,10 +238,10 @@ jobs:
               TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64"
             fi
 
-            # Build and push AMD64
+            # Build and push AMD64 - use output type image to create single-arch image
             docker buildx build \
               --platform linux/amd64 \
-              --push \
+              --output type=image,push=true \
               $TAGS \
               --label "org.opencontainers.image.title=ryansend" \
               --label "org.opencontainers.image.description=A secure file sharing tool using PASETO tokens" \
@@ -330,10 +330,10 @@ jobs:
               TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64"
             fi
 
-            # Build and push ARM64
+            # Build and push ARM64 - use output type image to create single-arch image
             docker buildx build \
               --platform linux/arm64 \
-              --push \
+              --output type=image,push=true \
               $TAGS \
               --label "org.opencontainers.image.title=ryansend" \
               --label "org.opencontainers.image.description=A secure file sharing tool using PASETO tokens" \
@@ -379,15 +379,18 @@ jobs:
       - run:
           name: Create and push multi-arch manifest
           command: |
+            # Enable experimental CLI features for manifest commands
+            export DOCKER_CLI_EXPERIMENTAL=enabled
+
             # Always create manifest for Cargo.toml version
-            docker manifest create $DOCKER_USERNAME/ryansend:$CARGO_VERSION \
+            docker manifest create --amend $DOCKER_USERNAME/ryansend:$CARGO_VERSION \
               $DOCKER_USERNAME/ryansend:$CARGO_VERSION-amd64 \
               $DOCKER_USERNAME/ryansend:$CARGO_VERSION-arm64
             docker manifest push $DOCKER_USERNAME/ryansend:$CARGO_VERSION
 
             # Create latest manifest if on main branch
             if [ "$CIRCLE_BRANCH" = "main" ]; then
-              docker manifest create $DOCKER_USERNAME/ryansend:latest \
+              docker manifest create --amend $DOCKER_USERNAME/ryansend:latest \
                 $DOCKER_USERNAME/ryansend:latest-amd64 \
                 $DOCKER_USERNAME/ryansend:latest-arm64
               docker manifest push $DOCKER_USERNAME/ryansend:latest
@@ -396,7 +399,7 @@ jobs:
             # Create tag manifest if triggered by tag
             if [ ! -z "$CIRCLE_TAG" ]; then
               TAG_WITHOUT_V=${CIRCLE_TAG#v}
-              docker manifest create $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V \
+              docker manifest create --amend $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V \
                 $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64 \
                 $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64
               docker manifest push $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V
@@ -405,7 +408,7 @@ jobs:
             # Create branch manifest for non-tag pushes (sanitized)
             if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
               SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
-              docker manifest create $DOCKER_USERNAME/ryansend:$SAFE_BRANCH \
+              docker manifest create --amend $DOCKER_USERNAME/ryansend:$SAFE_BRANCH \
                 $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64 \
                 $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64
               docker manifest push $DOCKER_USERNAME/ryansend:$SAFE_BRANCH
