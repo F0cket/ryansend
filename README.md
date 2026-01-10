@@ -40,6 +40,33 @@ You can just run `ryansend start`, and assuming you run with adequate permission
 
 If you want to disable the ko-fi link, just set `remove_kofi: false` in the config.yaml.
 
+### Unraid
+
+You don't need to use unraid to use ryansend, but it does work great! If you just want docker, skip to the docker section below.
+
+If you want to set up unraid, there are a few steps. First, ryansend isn't in the unraid app store yet, so you'll need to manually install the xml template:
+
+```
+curl https://raw.githubusercontent.com/rlittlefield/ryansend/refs/heads/main/unraid/ryansend.xml > /boot/config/plugins/dockerMan/templates-user
+```
+
+Now you can easily configure ryansend by going to the Docker menu in Unraid, then clicking the orange "Add Container" button on the bottom left of the page.
+
+It should load a bunch of settings for you. The main thing to change are:
+1. Main and Admin ports. The defaults might be fine for you, but you'll want to match it with whatever you plan on exposing through your port forwarding or firewall.
+2. Mounts - the default mounts might be fine, but you may want to change the `Shared Files` to point to a more specific directory if you don't want the whole `/mnt/user` to be visible in the admin share page.
+3. Base URL - this needs to be your IP address or a domain (DDNS works great), including the port number you set on the "main" port (unless you are doing some port forwarding)
+
+#### Cloudflare
+
+If you do cloudflare, you can use either of these to get yourself a DNS (if you own/buy a domain and run it through cloudflare):
+1. https://github.com/IPGPrometheus/Cloudflared-Unraid (this is great because it can provide https and forward to port 3000!)
+2. https://github.com/oznu/docker-cloudflare-ddns or a similar ddns image
+
+#### Tailscale
+
+Unraid tailscale works great. You'll need to set up tailscale on your own using the recommended tailscale stuff for unraid. You can check the box for "Use Tailscale", and then you'll need to choose a tailscale hostname. It will default to port 3000, but I think you should change it to 3001 because the admin interface can then be used by your phone or other tailscale device to share files.
+
 ### Docker
 
 There is a ryansend docker image hosted at dockerhub: https://hub.docker.com/r/ryanlittlefield/ryansend
