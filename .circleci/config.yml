@@ -204,45 +204,14 @@ jobs:
             echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin
 
       - run:
-          name: Setup Docker Buildx
-          command: |
-            # Enable experimental features and setup buildx
-            export DOCKER_CLI_EXPERIMENTAL=enabled
-            docker buildx create --name mybuilder --driver docker-container --use
-            docker buildx inspect --bootstrap
-
-      - run:
           name: Build and push AMD64 Docker image
           command: |
-            # Determine tags for AMD64
-            TAGS=""
-
             # Always tag with Cargo.toml version
-            TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$CARGO_VERSION-amd64"
+            TAG_NAME="$DOCKER_USERNAME/ryansend:$CARGO_VERSION-amd64"
 
-            # Tag with latest if on main branch
-            if [ "$CIRCLE_BRANCH" = "main" ]; then
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:latest-amd64"
-            fi
-
-            # Tag with git tag if triggered by tag
-            if [ ! -z "$CIRCLE_TAG" ]; then
-              TAG_WITHOUT_V=${CIRCLE_TAG#v}
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64"
-            fi
-
-            # Tag with branch name for non-tag pushes (sanitized)
-            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
-              # Sanitize branch name for Docker tag (replace / with -)
-              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64"
-            fi
-
-            # Build and push AMD64 - use output type image to create single-arch image
-            docker buildx build \
-              --platform linux/amd64 \
-              --output type=image,push=true \
-              $TAGS \
+            # Build AMD64 image
+            docker build \
+              --tag $TAG_NAME \
               --label "org.opencontainers.image.title=ryansend" \
               --label "org.opencontainers.image.description=A secure file sharing tool using PASETO tokens" \
               --label "org.opencontainers.image.version=$CARGO_VERSION" \
@@ -251,6 +220,27 @@ jobs:
               --label "org.opencontainers.image.revision=$CIRCLE_SHA1" \
               --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               .
+
+            # Push AMD64 image
+            docker push $TAG_NAME
+
+            # Tag and push additional tags
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:latest-amd64
+              docker push $DOCKER_USERNAME/ryansend:latest-amd64
+            fi
+
+            if [ ! -z "$CIRCLE_TAG" ]; then
+              TAG_WITHOUT_V=${CIRCLE_TAG#v}
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64
+              docker push $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-amd64
+            fi
+
+            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
+              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64
+              docker push $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-amd64
+            fi
 
       - run:
           name: Generate AMD64 summary
@@ -296,45 +286,14 @@ jobs:
             echo $DOCKER_TOKEN | docker login -u $DOCKER_USERNAME --password-stdin
 
       - run:
-          name: Setup Docker Buildx
-          command: |
-            # Enable experimental features and setup buildx
-            export DOCKER_CLI_EXPERIMENTAL=enabled
-            docker buildx create --name mybuilder --driver docker-container --use
-            docker buildx inspect --bootstrap
-
-      - run:
           name: Build and push ARM64 Docker image
           command: |
-            # Determine tags for ARM64
-            TAGS=""
-
             # Always tag with Cargo.toml version
-            TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$CARGO_VERSION-arm64"
+            TAG_NAME="$DOCKER_USERNAME/ryansend:$CARGO_VERSION-arm64"
 
-            # Tag with latest if on main branch
-            if [ "$CIRCLE_BRANCH" = "main" ]; then
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:latest-arm64"
-            fi
-
-            # Tag with git tag if triggered by tag
-            if [ ! -z "$CIRCLE_TAG" ]; then
-              TAG_WITHOUT_V=${CIRCLE_TAG#v}
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64"
-            fi
-
-            # Tag with branch name for non-tag pushes (sanitized)
-            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
-              # Sanitize branch name for Docker tag (replace / with -)
-              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
-              TAGS="$TAGS -t $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64"
-            fi
-
-            # Build and push ARM64 - use output type image to create single-arch image
-            docker buildx build \
-              --platform linux/arm64 \
-              --output type=image,push=true \
-              $TAGS \
+            # Build ARM64 image (native build on ARM64 machine)
+            docker build \
+              --tag $TAG_NAME \
               --label "org.opencontainers.image.title=ryansend" \
               --label "org.opencontainers.image.description=A secure file sharing tool using PASETO tokens" \
               --label "org.opencontainers.image.version=$CARGO_VERSION" \
@@ -343,6 +302,27 @@ jobs:
               --label "org.opencontainers.image.revision=$CIRCLE_SHA1" \
               --label "org.opencontainers.image.created=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
               .
+
+            # Push ARM64 image
+            docker push $TAG_NAME
+
+            # Tag and push additional tags
+            if [ "$CIRCLE_BRANCH" = "main" ]; then
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:latest-arm64
+              docker push $DOCKER_USERNAME/ryansend:latest-arm64
+            fi
+
+            if [ ! -z "$CIRCLE_TAG" ]; then
+              TAG_WITHOUT_V=${CIRCLE_TAG#v}
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64
+              docker push $DOCKER_USERNAME/ryansend:$TAG_WITHOUT_V-arm64
+            fi
+
+            if [ -z "$CIRCLE_TAG" ] && [ ! -z "$CIRCLE_BRANCH" ]; then
+              SAFE_BRANCH=$(echo "$CIRCLE_BRANCH" | sed 's/\//-/g')
+              docker tag $TAG_NAME $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64
+              docker push $DOCKER_USERNAME/ryansend:$SAFE_BRANCH-arm64
+            fi
 
       - run:
           name: Generate ARM64 summary
