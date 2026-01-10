@@ -24,25 +24,25 @@ fi
 # Create user if it doesn't exist
 if ! getent passwd appuser >/dev/null 2>&1; then
     log "Creating user 'appuser' with UID $PUID"
-    useradd -u "$PUID" -g "$PGID" -d /app -s /bin/bash appuser
+    useradd -u "$PUID" -g "$PGID" -d /data -s /bin/bash appuser
 else
     # Modify existing user to match PUID/PGID
     log "Updating user 'appuser' to UID $PUID and GID $PGID"
     usermod -u "$PUID" -g "$PGID" appuser >/dev/null 2>&1 || true
 fi
 
-# Ensure /app directory exists and has correct permissions
-mkdir -p /app
-chown -R "$PUID:$PGID" /app
+# Ensure /data directory exists and has correct permissions
+mkdir -p /data
+chown -R "$PUID:$PGID" /data
 
 # If config.yaml doesn't exist and we have environment variables,
 # we may need to initialize with proper permissions
-if [ ! -f /app/config.yaml ]; then
+if [ ! -f /data/config.yaml ]; then
     log "No config.yaml found - ryansend will create one on startup"
 fi
 
 # Log some useful information
-log "Working directory: /app"
+log "Working directory: /data"
 log "Binary location: /usr/local/bin/ryansend"
 log "License files: /ryansend/"
 

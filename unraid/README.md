@@ -27,7 +27,7 @@ Ports:
 - 3001: Admin panel (if enabled)
 
 Volumes:
-- /mnt/user/appdata/ryansend -> /app (config storage)
+- /mnt/user/appdata/ryansend -> /data (config storage)
 - /mnt/user/ -> /shared (your files, read-only)
 
 Environment:

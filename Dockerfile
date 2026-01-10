@@ -41,8 +41,8 @@ COPY LICENSE /ryansend/LICENSE
 # Make binary and entrypoint executable and create working directory
 RUN chmod +x /usr/local/bin/ryansend && \
     chmod +x /usr/local/bin/docker-entrypoint.sh && \
-    mkdir -p /app
-WORKDIR /app
+    mkdir -p /data
+WORKDIR /data
 
 # Expose the default port
 EXPOSE 3000
