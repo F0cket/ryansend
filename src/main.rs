@@ -6,6 +6,7 @@ mod admin;
 mod auth;
 mod config;
 mod error;
+mod rate_limit;
 mod server;
 
 use anyhow::Result;

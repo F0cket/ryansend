@@ -16,13 +16,22 @@ use rust_search::{similarity_sort, SearchBuilder};
 use rusty_paseto::prelude::*;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs;
 use urlencoding::encode;
 
 use crate::auth::{generate_token, generate_url, verify_admin_token, AdminTokenClaims};
 use crate::config::Config;
 use crate::error::{handle_404, make_admin_error_response};
-use crate::server::AppState;
+use crate::rate_limit::{
+    admin_login_rate_limit_middleware, create_rate_limiter, AdminRateLimitConfig, AdminRateLimiter,
+};
+
+#[derive(Clone)]
+pub struct AdminAppState {
+    pub config: Config,
+    pub admin_login_rate_limiter: Option<Arc<AdminRateLimiter>>,
+}
 
 #[derive(Template)]
 #[template(path = "login.html")]
@@ -70,7 +79,7 @@ struct AdminDownloadQuery {
 }
 
 async fn admin_auth_middleware(
-    State(state): State<AppState>,
+    State(state): State<AdminAppState>,
     cookies: CookieJar,
     request: Request<Body>,
     next: Next,
@@ -96,7 +105,7 @@ async fn admin_auth_middleware(
     make_admin_error_response(StatusCode::UNAUTHORIZED)
 }
 
-async fn admin_root_handler(State(state): State<AppState>, cookies: CookieJar) -> Response {
+async fn admin_root_handler(State(state): State<AdminAppState>, cookies: CookieJar) -> Response {
     // Check if admin panel is enabled
     match &state.config.admin {
         Some(config) if config.enabled => config,
@@ -136,7 +145,7 @@ async fn admin_login_page() -> Html<String> {
 }
 
 async fn admin_login_handler(
-    State(state): State<AppState>,
+    State(state): State<AdminAppState>,
     Form(form): Form<LoginForm>,
 ) -> Response {
     let admin_config = match &state.config.admin {
@@ -220,7 +229,7 @@ fn format_file_size(size: u64) -> String {
 }
 
 async fn admin_files_handler(
-    State(state): State<AppState>,
+    State(state): State<AdminAppState>,
     Query(query): Query<FilesQuery>,
 ) -> Response {
     // Get the sharing root from admin config (middleware ensures admin is enabled)
@@ -442,7 +451,7 @@ async fn perform_search(
 }
 
 async fn admin_download_handler(
-    State(state): State<AppState>,
+    State(state): State<AdminAppState>,
     Query(query): Query<AdminDownloadQuery>,
 ) -> Response {
     // Middleware ensures admin is enabled and authenticated
@@ -500,7 +509,7 @@ async fn admin_download_handler(
 }
 
 async fn admin_share_handler(
-    State(state): State<AppState>,
+    State(state): State<AdminAppState>,
     Query(query): Query<AdminDownloadQuery>,
 ) -> Response {
     // Middleware ensures admin is enabled and authenticated
@@ -569,8 +578,12 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         _ => return Ok(()), // Admin disabled, do nothing
     };
 
-    let state = AppState {
+    // Create rate limiter for login endpoint only (5 attempts per minute)
+    let admin_login_rate_limiter = Arc::new(create_rate_limiter(AdminRateLimitConfig::for_login()));
+
+    let state = AdminAppState {
         config: config.clone(),
+        admin_login_rate_limiter: Some(admin_login_rate_limiter),
     };
 
     let protected_routes = Router::new()
@@ -585,7 +598,13 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
     let app = Router::new()
         .route("/", get(admin_root_handler))
         .route("/admin/login", get(admin_login_page))
-        .route("/admin/login", post(admin_login_handler))
+        .route(
+            "/admin/login",
+            post(admin_login_handler).route_layer(middleware::from_fn_with_state(
+                state.clone(),
+                admin_login_rate_limit_middleware,
+            )),
+        )
         .route("/admin/logout", get(admin_logout_handler))
         .merge(protected_routes)
         .fallback(handle_404)
