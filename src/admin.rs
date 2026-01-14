@@ -20,7 +20,9 @@ use std::sync::Arc;
 use tokio::fs;
 use urlencoding::encode;
 
-use crate::auth::{generate_token, generate_url, verify_admin_token, AdminTokenClaims};
+use crate::auth::{
+    generate_token_with_options, generate_url_with_options, verify_admin_token, AdminTokenClaims,
+};
 use crate::config::Config;
 use crate::error::{handle_404, make_admin_error_response};
 use crate::rate_limit::{
@@ -76,6 +78,7 @@ struct FilesQuery {
 #[derive(Deserialize)]
 struct AdminDownloadQuery {
     path: String,
+    note: Option<String>,
 }
 
 async fn admin_auth_middleware(
@@ -490,7 +493,15 @@ async fn admin_download_handler(
     }
 
     // Generate a temporary download token (1 hour)
-    let download_token = match generate_token(&state.config, &file_path, 3600).await {
+    let download_token = match generate_token_with_options(
+        &state.config,
+        &file_path,
+        3600,
+        None,
+        query.note.clone(),
+    )
+    .await
+    {
         Ok(token) => token,
         Err(_) => return make_admin_error_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -548,7 +559,70 @@ async fn admin_share_handler(
     }
 
     // Generate share URL (24 hours)
-    let share_url = match generate_url(&state.config, &file_path, 86400).await {
+    let share_url =
+        match generate_url_with_options(&state.config, &file_path, 86400, None, query.note.clone())
+            .await
+        {
+            Ok(url) => url,
+            Err(_) => return make_admin_error_response(StatusCode::INTERNAL_SERVER_ERROR),
+        };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/plain")
+        .body(Body::from(share_url))
+        .expect("Failed to build share URL response")
+}
+
+async fn admin_single_use_download_handler(
+    State(state): State<AdminAppState>,
+    Query(query): Query<AdminDownloadQuery>,
+) -> Response {
+    // Middleware ensures admin is enabled and authenticated
+    let admin_config = state
+        .config
+        .admin
+        .as_ref()
+        .expect("Admin config should exist when middleware passes");
+
+    // Construct and validate file path within sharing root
+    let base_path = PathBuf::from(&admin_config.sharing_root);
+    let mut full_path = base_path.clone();
+    if query.path != "." {
+        full_path.push(&query.path);
+    }
+
+    // Canonicalize paths to prevent directory traversal attacks
+    let canonical_base = match base_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return make_admin_error_response(StatusCode::NOT_FOUND),
+    };
+    let canonical_full = match full_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => return make_admin_error_response(StatusCode::NOT_FOUND),
+    };
+
+    // Ensure the requested path is within the sharing root
+    if !canonical_full.starts_with(&canonical_base) {
+        return make_admin_error_response(StatusCode::FORBIDDEN);
+    }
+
+    let file_path = canonical_full;
+
+    if !file_path.exists() || file_path.is_dir() {
+        return make_admin_error_response(StatusCode::NOT_FOUND);
+    }
+
+    // Generate single-use URL (24 hours with max_uses=1)
+    let share_url = match generate_url_with_options(
+        &state.config,
+        &file_path,
+        86400,
+        Some(1),
+        query.note.clone(),
+    )
+    .await
+    {
         Ok(url) => url,
         Err(_) => return make_admin_error_response(StatusCode::INTERNAL_SERVER_ERROR),
     };
@@ -557,7 +631,7 @@ async fn admin_share_handler(
         .status(StatusCode::OK)
         .header("content-type", "text/plain")
         .body(Body::from(share_url))
-        .expect("Failed to build share URL response")
+        .expect("Failed to build single-use share URL response")
 }
 
 async fn admin_logout_handler() -> Response {
@@ -590,6 +664,7 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         .route("/admin/files", get(admin_files_handler))
         .route("/admin/download", get(admin_download_handler))
         .route("/admin/share", get(admin_share_handler))
+        .route("/admin/single-use", get(admin_single_use_download_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_middleware,

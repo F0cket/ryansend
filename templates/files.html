@@ -139,9 +139,32 @@
             .btn-share:hover {
                 background: #138496;
             }
+            .btn-single-use {
+                background: #fd7e14;
+                color: white;
+            }
+            .btn-single-use:hover {
+                background: #e8650e;
+            }
             .empty-state {
                 text-align: center;
                 color: #6c757d;
+            }
+            .action-form {
+                display: flex;
+                align-items: center;
+                gap: 8px;
+            }
+            .note-input {
+                padding: 0.25rem 0.5rem;
+                border: 1px solid #dee2e6;
+                border-radius: 3px;
+                font-size: 0.75rem;
+                width: 120px;
+            }
+            .note-input:focus {
+                outline: none;
+                border-color: #007bff;
             }
             .parent-dir {
                 color: #6f42c1;
@@ -296,16 +319,86 @@
                         <td>
                             {% if !entry.is_dir %}
                             <div class="actions">
-                                <a
-                                    href="/admin/download?path={{ entry.path }}"
-                                    class="btn btn-download"
-                                    >Download</a
-                                >
-                                <a
-                                    href="/admin/share?path={{ entry.path }}"
-                                    class="btn btn-share"
-                                    >Share</a
-                                >
+                                <div class="action-form">
+                                    <form
+                                        id="download-form-search-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/download"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="download-note-search-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-download"
+                                        >
+                                            Download
+                                        </button>
+                                    </form>
+                                    <form
+                                        id="share-form-search-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/share"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="share-note-search-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-share"
+                                        >
+                                            Share
+                                        </button>
+                                    </form>
+                                    <form
+                                        id="single-use-form-search-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/single-use"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="single-use-note-search-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-single-use"
+                                        >
+                                            Single-use
+                                        </button>
+                                    </form>
+                                    <input
+                                        type="text"
+                                        placeholder="Note (optional)"
+                                        class="note-input"
+                                        oninput="updateNotes('search-{{ loop.index0 }}', this.value)"
+                                    />
+                                </div>
                             </div>
                             {% endif %}
                         </td>
@@ -374,16 +467,86 @@
                         <td>
                             {% if !entry.is_dir %}
                             <div class="actions">
-                                <a
-                                    href="/admin/download?path={{ entry.path }}"
-                                    class="btn btn-download"
-                                    >Download</a
-                                >
-                                <a
-                                    href="/admin/share?path={{ entry.path }}"
-                                    class="btn btn-share"
-                                    >Share</a
-                                >
+                                <div class="action-form">
+                                    <form
+                                        id="download-form-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/download"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="download-note-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-download"
+                                        >
+                                            Download
+                                        </button>
+                                    </form>
+                                    <form
+                                        id="share-form-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/share"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="share-note-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-share"
+                                        >
+                                            Share
+                                        </button>
+                                    </form>
+                                    <form
+                                        id="single-use-form-{{ loop.index0 }}"
+                                        method="get"
+                                        action="/admin/single-use"
+                                        style="display: inline"
+                                    >
+                                        <input
+                                            type="hidden"
+                                            name="path"
+                                            value="{{ entry.path }}"
+                                        />
+                                        <input
+                                            type="hidden"
+                                            name="note"
+                                            value=""
+                                            id="single-use-note-{{ loop.index0 }}"
+                                        />
+                                        <button
+                                            type="submit"
+                                            class="btn btn-single-use"
+                                        >
+                                            Single-use
+                                        </button>
+                                    </form>
+                                    <input
+                                        type="text"
+                                        placeholder="Note (optional)"
+                                        class="note-input"
+                                        oninput="updateNotes('{{ loop.index0 }}', this.value)"
+                                    />
+                                </div>
                             </div>
                             {% endif %}
                         </td>
@@ -392,5 +555,13 @@
                 </tbody>
             </table>
         </div>
+        <script>
+            function updateNotes(index, value) {
+                document.getElementById("download-note-" + index).value = value;
+                document.getElementById("share-note-" + index).value = value;
+                document.getElementById("single-use-note-" + index).value =
+                    value;
+            }
+        </script>
     </body>
 </html>

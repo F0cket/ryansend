@@ -11,11 +11,14 @@ use log::{debug, error, info, warn};
 use serde::Deserialize;
 use std::io::SeekFrom;
 use std::path::PathBuf;
+use std::sync::Arc;
+use timedmap::TimedMap;
 use tokio::fs;
 use tokio::io::{AsyncReadExt, AsyncSeekExt};
+use tokio::sync::Mutex;
 use tokio_util::io::ReaderStream;
 
-use crate::auth::verify_token_and_get_path;
+use crate::auth::verify_token_and_get_claims;
 use crate::config::Config;
 use crate::error::{handle_404, AppError, AppResult};
 
@@ -80,6 +83,7 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<ByteRange> {
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
+    pub download_tracker: Arc<Mutex<TimedMap<String, u32>>>,
 }
 
 #[derive(Deserialize)]
@@ -97,25 +101,64 @@ pub async fn download_handler(
         &params.token[..std::cmp::min(20, params.token.len())]
     );
 
-    let file_path = verify_token_and_get_path(&state.config.secret_key, &params.token)
+    let claims = verify_token_and_get_claims(&state.config.secret_key, &params.token)
         .await
         .map_err(|e| {
             warn!("Token verification failed: {}", e);
             AppError::not_found(anyhow::anyhow!("Token verification failed"))
         })?;
 
-    let path = PathBuf::from(&file_path);
+    // Check if token has max_uses limit
+    if let Some(max_uses) = claims.max_uses {
+        #[allow(unused_mut)]
+        let mut tracker = state.download_tracker.lock().await;
+        let current_uses = match tracker.get(&claims.id) {
+            Some(uses) => uses,
+            None => 0,
+        };
+
+        if current_uses >= max_uses {
+            warn!(
+                "Token {} has exceeded max uses ({}/{})",
+                claims.id, current_uses, max_uses
+            );
+            return Err(AppError::not_found(anyhow::anyhow!(
+                "Token has exceeded maximum uses"
+            )));
+        }
+
+        // Calculate duration until one minute past token expiration
+        let now = chrono::Utc::now();
+        let track_until = claims.exp + chrono::Duration::minutes(1);
+        let duration_secs = (track_until - now).num_seconds().max(0) as u64;
+
+        // Update usage count
+        tracker.insert(
+            claims.id.clone(),
+            current_uses + 1,
+            std::time::Duration::from_secs(duration_secs),
+        );
+
+        info!(
+            "Token {} usage: {}/{}",
+            claims.id,
+            current_uses + 1,
+            max_uses
+        );
+    }
+
+    let path = PathBuf::from(&claims.path);
 
     if !path.exists() {
-        warn!("File not found: {}", file_path);
+        warn!("File not found: {}", claims.path);
         return Err(AppError::not_found(anyhow::anyhow!(
             "File not found: {}",
-            file_path
+            claims.path
         )));
     }
 
     let file = fs::File::open(&path).await.map_err(|e| {
-        error!("Failed to open file {}: {}", file_path, e);
+        error!("Failed to open file {}: {}", claims.path, e);
         anyhow::anyhow!("Failed to open file: {}", e)
     })?;
 
@@ -129,7 +172,7 @@ pub async fn download_handler(
         .metadata()
         .await
         .map_err(|e| {
-            error!("Failed to get file metadata for {}: {}", file_path, e);
+            error!("Failed to get file metadata for {}: {}", claims.path, e);
             anyhow::anyhow!("Failed to get file metadata: {}", e)
         })?
         .len();
@@ -154,7 +197,7 @@ pub async fn download_handler(
 
         // Create a new file handle for seeking
         let mut seekable_file = fs::File::open(&path).await.map_err(|e| {
-            error!("Failed to reopen file {}: {}", file_path, e);
+            error!("Failed to reopen file {}: {}", claims.path, e);
             anyhow::anyhow!("Failed to reopen file: {}", e)
         })?;
 
@@ -165,7 +208,7 @@ pub async fn download_handler(
             .map_err(|e| {
                 error!(
                     "Failed to seek to position {} in file {}: {}",
-                    start, file_path, e
+                    start, claims.path, e
                 );
                 anyhow::anyhow!("Failed to seek to position {}: {}", start, e)
             })?;
@@ -173,9 +216,13 @@ pub async fn download_handler(
         // Take only the requested range
         let limited_file = seekable_file.take(content_length);
 
+        let note_info = match &claims.note {
+            Some(note) => format!(" (note: \"{}\")", note),
+            None => String::new(),
+        };
         info!(
-            "Partial file served: '{}' bytes {}-{}/{} ({} bytes) from path: {}",
-            file_name, start, end, file_size, content_length, file_path
+            "Partial file served: '{}' bytes {}-{}/{} ({} bytes) from path: {} [token_id: {}]{}",
+            file_name, start, end, file_size, content_length, claims.path, claims.id, note_info
         );
 
         (
@@ -187,9 +234,13 @@ pub async fn download_handler(
         )
     } else {
         // No range request, serve the entire file
+        let note_info = match &claims.note {
+            Some(note) => format!(" (note: \"{}\")", note),
+            None => String::new(),
+        };
         info!(
-            "File downloaded: '{}' ({} bytes) from path: {}",
-            file_name, file_size, file_path
+            "File downloaded: '{}' ({} bytes) from path: {} [token_id: {}]{}",
+            file_name, file_size, claims.path, claims.id, note_info
         );
 
         (
@@ -243,6 +294,7 @@ pub async fn download_handler(
 pub async fn run_server(config: Config) -> Result<()> {
     let state = AppState {
         config: config.clone(),
+        download_tracker: Arc::new(Mutex::new(TimedMap::new())),
     };
 
     let app = Router::new()

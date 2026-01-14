@@ -26,6 +26,8 @@ time = "0.3"
 rust_search = "2.1"
 urlencoding = "2.1"
 governor = "0.6"
+timedmap = "1.0"
+hex = "0.4"
 
 [dev-dependencies]
 tempfile = "3.8"
