@@ -67,63 +67,84 @@
                 box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
                 overflow: hidden;
             }
-            table {
-                width: 100%;
-                border-collapse: collapse;
+            .file-list {
+                background: white;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                overflow: hidden;
             }
-            thead {
-                background: #f8f9fa;
-            }
-            th {
-                text-align: left;
-                font-weight: 600;
-                color: #495057;
-                border-bottom: 2px solid #dee2e6;
-            }
-            tr {
+            .file-item {
+                display: flex;
+                align-items: center;
+                padding: 0.3rem 0.5rem;
                 border-bottom: 1px solid #dee2e6;
+                gap: 0.5rem;
+                min-height: 40px;
             }
-            td {
-                vertical-align: middle;
+            .file-item:last-child {
+                border-bottom: none;
             }
-            tr:hover {
+            .file-item:hover {
                 background-color: #f8f9fa;
             }
             .file-icon {
-                width: 20px;
-                height: 20px;
-                margin-right: 8px;
-                vertical-align: middle;
+                width: 24px;
+                height: 24px;
+                flex-shrink: 0;
+                font-size: 1.2rem;
+            }
+            .file-info {
+                flex: 1;
+                min-width: 0;
+                display: flex;
+                flex-direction: column;
+                gap: 0.1rem;
             }
             .file-name {
-                display: flex;
-                align-items: center;
-            }
-            .file-name a {
-                color: #007bff;
+                font-weight: 500;
+                color: #333;
                 text-decoration: none;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
             }
-            .file-name a:hover {
+            .file-name:hover {
+                color: #007bff;
                 text-decoration: underline;
             }
-            .directory {
+            .directory-name {
                 color: #6f42c1;
                 font-weight: 500;
+                text-decoration: none;
+            }
+            .directory-name:hover {
+                color: #5a2d91;
+                text-decoration: underline;
+            }
+            .file-path {
+                color: #6c757d;
+                font-size: 0.65rem;
+                overflow: hidden;
+                text-overflow: ellipsis;
+                white-space: nowrap;
+                opacity: 0.7;
             }
             .file-size {
                 color: #6c757d;
-                font-size: 0.875rem;
+                font-size: 0.75rem;
+                white-space: nowrap;
             }
-            .actions {
+            .file-actions {
                 display: flex;
-                gap: 8px;
                 align-items: center;
+                gap: 0.5rem;
+                flex-shrink: 0;
             }
             .btn {
-                padding: 0.25rem 0.5rem;
+                padding: 0.2rem 0.4rem;
                 border: none;
-                border-radius: 4px;
-                font-size: 0.75rem;
+                border-radius: 3px;
+                font-size: 0.7rem;
                 cursor: pointer;
                 text-decoration: none;
                 display: inline-block;
@@ -152,20 +173,21 @@
             .empty-state {
                 text-align: center;
                 color: #6c757d;
+                padding: 1.5rem 1rem;
             }
             .action-form {
                 display: flex;
                 align-items: center;
-                gap: 8px;
+                gap: 0.4rem;
                 flex-wrap: wrap;
             }
             .note-input {
-                padding: 0.25rem 0.5rem;
+                padding: 0.2rem 0.4rem;
                 border: 1px solid #dee2e6;
                 border-radius: 3px;
-                font-size: 0.75rem;
-                width: 120px;
-                min-width: 80px;
+                font-size: 0.65rem;
+                width: 90px;
+                min-width: 70px;
             }
             .note-input:focus {
                 outline: none;
@@ -193,23 +215,27 @@
                     gap: 8px;
                 }
 
-                .file-browser {
-                    overflow-x: auto;
-                    -webkit-overflow-scrolling: touch;
+                .file-item {
+                    flex-wrap: wrap;
+                    gap: 0.3rem;
+                    padding: 0.5rem;
                 }
 
-                table {
-                    min-width: 600px;
-                }
-
-                .actions {
+                .file-info {
+                    flex: 1;
                     min-width: 200px;
+                }
+
+                .file-actions {
+                    width: 100%;
+                    justify-content: flex-start;
                 }
 
                 .action-form {
                     flex-direction: column;
-                    gap: 4px;
+                    gap: 0.3rem;
                     align-items: stretch;
+                    width: 100%;
                 }
 
                 .action-form form {
@@ -219,33 +245,14 @@
                 .btn {
                     width: 100%;
                     text-align: center;
+                    font-size: 0.8rem;
+                    padding: 0.4rem;
                 }
 
                 .note-input {
                     width: 100%;
-                    margin-top: 4px;
-                }
-
-                .file-name {
-                    max-width: 150px;
-                    overflow: hidden;
-                    text-overflow: ellipsis;
-                    white-space: nowrap;
-                }
-
-                .file-size {
-                    font-size: 0.7rem;
-                }
-
-                th,
-                td {
-                    padding: 0.5rem 0.25rem;
-                    font-size: 0.875rem;
-                }
-
-                .search-results {
-                    overflow-x: auto;
-                    -webkit-overflow-scrolling: touch;
+                    margin-top: 0.3rem;
+                    font-size: 0.8rem;
                 }
 
                 .search-form {
@@ -263,37 +270,37 @@
                     padding: 5px;
                 }
 
-                table {
-                    min-width: 450px;
-                    font-size: 0.8rem;
+                .file-item {
+                    padding: 0.4rem 0.3rem;
+                    min-height: auto;
                 }
 
-                .actions {
-                    min-width: 160px;
-                }
-
-                .note-input {
-                    font-size: 0.7rem;
-                    padding: 0.2rem 0.4rem;
-                }
-
-                .btn {
-                    font-size: 0.7rem;
-                    padding: 0.2rem 0.4rem;
-                    margin-bottom: 2px;
+                .file-icon {
+                    width: 20px;
+                    height: 20px;
+                    font-size: 1rem;
                 }
 
                 .file-name {
-                    max-width: 80px;
+                    font-size: 0.9rem;
+                }
+
+                .file-path {
+                    font-size: 0.7rem;
                 }
 
                 .file-size {
-                    font-size: 0.65rem;
+                    font-size: 0.75rem;
                 }
 
-                th,
-                td {
-                    padding: 0.3rem 0.2rem;
+                .btn {
+                    font-size: 0.75rem;
+                    padding: 0.3rem;
+                }
+
+                .note-input {
+                    font-size: 0.75rem;
+                    padding: 0.3rem;
                 }
 
                 .breadcrumb {
@@ -316,21 +323,22 @@
 
             /* Extra small screens */
             @media (max-width: 320px) {
-                .actions {
-                    min-width: 140px;
+                .file-item {
+                    padding: 0.3rem;
                 }
 
                 .note-input {
-                    font-size: 0.65rem;
+                    font-size: 0.7rem;
+                    padding: 0.25rem;
                 }
 
                 .btn {
-                    font-size: 0.65rem;
-                    padding: 0.15rem 0.3rem;
+                    font-size: 0.7rem;
+                    padding: 0.25rem;
                 }
 
-                .file-name {
-                    max-width: 60px;
+                .file-path {
+                    display: none;
                 }
             }
             .parent-dir {
@@ -452,130 +460,120 @@
 
         {% if has_search_results %}
         <div class="search-results">
+            <h3
+                style="
+                    background: #f8f9fa;
+                    margin: 0;
+                    padding: 1rem 2rem;
+                    color: #495057;
+                    font-size: 1.1rem;
+                    border-bottom: 1px solid #dee2e6;
+                "
+            >
+                {% if search_results.len() > 0 %} Search Results ({{
+                search_results.len() }} found) {% else %} Search Results {%
+                endif %}
+            </h3>
             {% if search_results.len() > 0 %}
-            <h3>Search Results ({{ search_results.len() }} found)</h3>
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Size</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% for entry in search_results %}
-                    <tr>
-                        <td class="file-name">
-                            <div class="file-name-with-path">
-                                <span class="file-icon">📄</span>
-                                <span title="{{ entry.path }}"
-                                    >{{ entry.name }}</span
+            <div class="file-list">
+                {% for entry in search_results %}
+                <div class="file-item">
+                    <div class="file-icon">📄</div>
+                    <div class="file-info">
+                        <div class="file-name" title="{{ entry.path }}">
+                            {{ entry.name }}
+                        </div>
+                        <div class="file-path" title="{{ entry.path }}">
+                            {{ entry.path_display }}
+                        </div>
+                    </div>
+                    <div class="file-size">
+                        {% if entry.is_dir %} - {% else %} {{ entry.size_display
+                        }} {% endif %}
+                    </div>
+                    {% if !entry.is_dir %}
+                    <div class="file-actions">
+                        <div class="action-form">
+                            <form
+                                id="download-form-search-{{ loop.index0 }}"
+                                method="get"
+                                action="/admin/download"
+                                style="display: inline"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="path"
+                                    value="{{ entry.path }}"
+                                />
+                                <input
+                                    type="hidden"
+                                    name="note"
+                                    value=""
+                                    id="download-note-search-{{ loop.index0 }}"
+                                />
+                                <button type="submit" class="btn btn-download">
+                                    Download
+                                </button>
+                            </form>
+                            <form
+                                id="share-form-search-{{ loop.index0 }}"
+                                method="get"
+                                action="/admin/share"
+                                style="display: inline"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="path"
+                                    value="{{ entry.path }}"
+                                />
+                                <input
+                                    type="hidden"
+                                    name="note"
+                                    value=""
+                                    id="share-note-search-{{ loop.index0 }}"
+                                />
+                                <button type="submit" class="btn btn-share">
+                                    Share
+                                </button>
+                            </form>
+                            <form
+                                id="single-use-form-search-{{ loop.index0 }}"
+                                method="get"
+                                action="/admin/single-use"
+                                style="display: inline"
+                            >
+                                <input
+                                    type="hidden"
+                                    name="path"
+                                    value="{{ entry.path }}"
+                                />
+                                <input
+                                    type="hidden"
+                                    name="note"
+                                    value=""
+                                    id="single-use-note-search-{{ loop.index0 }}"
+                                />
+                                <button
+                                    type="submit"
+                                    class="btn btn-single-use"
                                 >
-                                <span
-                                    class="file-path"
-                                    title="{{ entry.path }}"
-                                >
-                                    {{ entry.path_display }}
-                                </span>
-                            </div>
-                        </td>
-                        <td class="file-size">
-                            {% if entry.is_dir %} - {% else %} {{
-                            entry.size_display }} {% endif %}
-                        </td>
-                        <td>
-                            {% if !entry.is_dir %}
-                            <div class="actions">
-                                <div class="action-form">
-                                    <form
-                                        id="download-form-search-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/download"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="download-note-search-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-download"
-                                        >
-                                            Download
-                                        </button>
-                                    </form>
-                                    <form
-                                        id="share-form-search-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/share"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="share-note-search-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-share"
-                                        >
-                                            Share
-                                        </button>
-                                    </form>
-                                    <form
-                                        id="single-use-form-search-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/single-use"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="single-use-note-search-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-single-use"
-                                        >
-                                            Single-use
-                                        </button>
-                                    </form>
-                                    <input
-                                        type="text"
-                                        placeholder="Note (optional)"
-                                        class="note-input"
-                                        oninput="updateNotes('search-{{ loop.index0 }}', this.value)"
-                                    />
-                                </div>
-                            </div>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %}
-                </tbody>
-            </table>
+                                    Single-use
+                                </button>
+                            </form>
+                            <input
+                                type="text"
+                                placeholder="Note (optional)"
+                                class="note-input"
+                                oninput="updateNotes('search-{{ loop.index0 }}', this.value)"
+                            />
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
             {% else %}
-            <h3>Search Results</h3>
-            <div style="padding: 2rem; text-align: center; color: #6c757d">
+            <div class="empty-state">
                 No files or directories found matching "{{ search_query }}" in
                 the current folder.
             </div>
@@ -583,144 +581,124 @@
         </div>
         {% endif %}
 
-        <div class="file-browser">
-            <table>
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Size</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody>
-                    {% if show_parent %}
-                    <tr>
-                        <td class="file-name">
-                            <span class="parent-dir">📁</span>
-                            <a
-                                href="/admin/files?path={{ parent_path }}{% if !search_query.is_empty() %}&search={{ search_query_encoded }}{% endif %}"
-                                class="parent-dir"
-                                >.. (go back to parent directory)</a
-                            >
-                        </td>
-                        <td class="file-size">-</td>
-                        <td></td>
-                    </tr>
-                    {% endif %} {% if entries.is_empty() %}
-                    <tr>
-                        <td colspan="3" class="empty-state">
-                            No files or directories found
-                        </td>
-                    </tr>
-                    {% else %} {% for entry in entries %}
-                    <tr>
-                        <td class="file-name">
-                            {% if entry.is_dir %}
-                            <span class="file-icon">📁</span>
-                            <a
-                                href="/admin/files?path={{ entry.path }}{% if !search_query.is_empty() %}&search={{ search_query_encoded }}{% endif %}"
-                                class="directory"
-                                >{{ entry.name }}</a
-                            >
-                            {% else %}
-                            <span class="file-icon">📄</span>
-                            <span>{{ entry.name }}</span>
-                            {% endif %}
-                        </td>
-                        <td class="file-size">
-                            {% if entry.is_dir %} - {% else %} {{
-                            entry.size_display }} {% endif %}
-                        </td>
-                        <td>
-                            {% if !entry.is_dir %}
-                            <div class="actions">
-                                <div class="action-form">
-                                    <form
-                                        id="download-form-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/download"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="download-note-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-download"
-                                        >
-                                            Download
-                                        </button>
-                                    </form>
-                                    <form
-                                        id="share-form-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/share"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="share-note-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-share"
-                                        >
-                                            Share
-                                        </button>
-                                    </form>
-                                    <form
-                                        id="single-use-form-{{ loop.index0 }}"
-                                        method="get"
-                                        action="/admin/single-use"
-                                        style="display: inline"
-                                    >
-                                        <input
-                                            type="hidden"
-                                            name="path"
-                                            value="{{ entry.path }}"
-                                        />
-                                        <input
-                                            type="hidden"
-                                            name="note"
-                                            value=""
-                                            id="single-use-note-{{ loop.index0 }}"
-                                        />
-                                        <button
-                                            type="submit"
-                                            class="btn btn-single-use"
-                                        >
-                                            Single-use
-                                        </button>
-                                    </form>
-                                    <input
-                                        type="text"
-                                        placeholder="Note (optional)"
-                                        class="note-input"
-                                        oninput="updateNotes('{{ loop.index0 }}', this.value)"
-                                    />
-                                </div>
-                            </div>
-                            {% endif %}
-                        </td>
-                    </tr>
-                    {% endfor %} {% endif %}
-                </tbody>
-            </table>
+        <div class="file-list">
+            {% if show_parent %}
+            <div class="file-item">
+                <div class="file-icon">📁</div>
+                <div class="file-info">
+                    <a
+                        href="/admin/files?path={{ parent_path }}{% if !search_query.is_empty() %}&search={{ search_query_encoded }}{% endif %}"
+                        class="directory-name"
+                        >.. (go back to parent directory)</a
+                    >
+                </div>
+                <div class="file-size">-</div>
+                <div class="file-actions"></div>
+            </div>
+            {% endif %} {% if entries.is_empty() %}
+            <div class="empty-state">No files or directories found</div>
+            {% else %} {% for entry in entries %}
+            <div class="file-item">
+                <div class="file-icon">
+                    {% if entry.is_dir %}📁{% else %}📄{% endif %}
+                </div>
+                <div class="file-info">
+                    {% if entry.is_dir %}
+                    <a
+                        href="/admin/files?path={{ entry.path }}{% if !search_query.is_empty() %}&search={{ search_query_encoded }}{% endif %}"
+                        class="directory-name"
+                        title="{{ entry.path }}"
+                        >{{ entry.name }}</a
+                    >
+                    {% else %}
+                    <div class="file-name" title="{{ entry.path }}">
+                        {{ entry.name }}
+                    </div>
+                    {% endif %}
+                </div>
+                <div class="file-size">
+                    {% if entry.is_dir %} - {% else %} {{ entry.size_display }}
+                    {% endif %}
+                </div>
+                {% if !entry.is_dir %}
+                <div class="file-actions">
+                    <div class="action-form">
+                        <form
+                            id="download-form-{{ loop.index0 }}"
+                            method="get"
+                            action="/admin/download"
+                            style="display: inline"
+                        >
+                            <input
+                                type="hidden"
+                                name="path"
+                                value="{{ entry.path }}"
+                            />
+                            <input
+                                type="hidden"
+                                name="note"
+                                value=""
+                                id="download-note-{{ loop.index0 }}"
+                            />
+                            <button type="submit" class="btn btn-download">
+                                Download
+                            </button>
+                        </form>
+                        <form
+                            id="share-form-{{ loop.index0 }}"
+                            method="get"
+                            action="/admin/share"
+                            style="display: inline"
+                        >
+                            <input
+                                type="hidden"
+                                name="path"
+                                value="{{ entry.path }}"
+                            />
+                            <input
+                                type="hidden"
+                                name="note"
+                                value=""
+                                id="share-note-{{ loop.index0 }}"
+                            />
+                            <button type="submit" class="btn btn-share">
+                                Share
+                            </button>
+                        </form>
+                        <form
+                            id="single-use-form-{{ loop.index0 }}"
+                            method="get"
+                            action="/admin/single-use"
+                            style="display: inline"
+                        >
+                            <input
+                                type="hidden"
+                                name="path"
+                                value="{{ entry.path }}"
+                            />
+                            <input
+                                type="hidden"
+                                name="note"
+                                value=""
+                                id="single-use-note-{{ loop.index0 }}"
+                            />
+                            <button type="submit" class="btn btn-single-use">
+                                Single-use
+                            </button>
+                        </form>
+                        <input
+                            type="text"
+                            placeholder="Note (optional)"
+                            class="note-input"
+                            oninput="updateNotes('{{ loop.index0 }}', this.value)"
+                        />
+                    </div>
+                </div>
+                {% else %}
+                <div class="file-actions"></div>
+                {% endif %}
+            </div>
+            {% endfor %} {% endif %}
         </div>
         <script>
             function updateNotes(index, value) {
