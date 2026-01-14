@@ -717,20 +717,25 @@ mod tests {
     #[tokio::test]
     async fn test_search_functionality() {
         // Create a temporary directory with test files
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
         let temp_path = temp_dir.path();
 
         // Create test files
-        fs::write(temp_path.join("test_file.txt"), "test content").unwrap();
-        fs::write(temp_path.join("another_file.rs"), "rust code").unwrap();
-        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+        fs::write(temp_path.join("test_file.txt"), "test content")
+            .expect("Failed to write test_file.txt");
+        fs::write(temp_path.join("another_file.rs"), "rust code")
+            .expect("Failed to write another_file.rs");
+        fs::write(temp_path.join("readme.md"), "documentation").expect("Failed to write readme.md");
 
         // Create subdirectory with file
         let sub_dir = temp_path.join("subdir");
-        fs::create_dir(&sub_dir).unwrap();
-        fs::write(sub_dir.join("nested_file.log"), "log content").unwrap();
+        fs::create_dir(&sub_dir).expect("Failed to create subdirectory");
+        fs::write(sub_dir.join("nested_file.log"), "log content")
+            .expect("Failed to write nested_file.log");
 
-        let canonical_base = temp_path.canonicalize().unwrap();
+        let canonical_base = temp_path
+            .canonicalize()
+            .expect("Failed to canonicalize temp path");
 
         // Test search for "file" in root directory - should find files but not nested ones
         let results = perform_search(&canonical_base, "file", &canonical_base).await;
@@ -773,14 +778,16 @@ mod tests {
     #[tokio::test]
     async fn test_search_no_results_message() {
         // Create a temporary directory with test files
-        let temp_dir = TempDir::new().unwrap();
+        let temp_dir = TempDir::new().expect("Failed to create temporary directory for test");
         let temp_path = temp_dir.path();
 
         // Create only files that won't match our search
-        fs::write(temp_path.join("document.txt"), "content").unwrap();
-        fs::write(temp_path.join("readme.md"), "documentation").unwrap();
+        fs::write(temp_path.join("document.txt"), "content").expect("Failed to write document.txt");
+        fs::write(temp_path.join("readme.md"), "documentation").expect("Failed to write readme.md");
 
-        let canonical_base = temp_path.canonicalize().unwrap();
+        let canonical_base = temp_path
+            .canonicalize()
+            .expect("Failed to canonicalize temp path");
 
         // Search for something that won't be found
         let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
@@ -882,8 +889,12 @@ mod tests {
             remove_kofi: true, // Ko-fi link should be hidden
         };
 
-        let html_with_kofi = template_with_kofi.render().unwrap();
-        let html_without_kofi = template_without_kofi.render().unwrap();
+        let html_with_kofi = template_with_kofi
+            .render()
+            .expect("Failed to render template with kofi");
+        let html_without_kofi = template_without_kofi
+            .render()
+            .expect("Failed to render template without kofi");
 
         // When remove_kofi is false, Ko-fi link should be present
         assert!(

@@ -218,7 +218,8 @@ remove_kofi: false
 "#;
 
         // Parse the config
-        let mut config: Config = serde_yaml::from_str(test_config).unwrap();
+        let mut config: Config =
+            serde_yaml::from_str(test_config).expect("Failed to parse test config YAML");
 
         // Set the environment variable
         env::set_var("RYANSEND_ADMIN_PORT", "4001");
@@ -231,7 +232,14 @@ remove_kofi: false
         }
 
         // Verify the port was overridden
-        assert_eq!(config.admin.as_ref().unwrap().port, 4001);
+        assert_eq!(
+            config
+                .admin
+                .as_ref()
+                .expect("Admin config should be present")
+                .port,
+            4001
+        );
 
         // Clean up
         env::remove_var("RYANSEND_ADMIN_PORT");

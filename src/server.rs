@@ -112,10 +112,7 @@ pub async fn download_handler(
     if let Some(max_uses) = claims.max_uses {
         #[allow(unused_mut)]
         let mut tracker = state.download_tracker.lock().await;
-        let current_uses = match tracker.get(&claims.id) {
-            Some(uses) => uses,
-            None => 0,
-        };
+        let current_uses: u32 = tracker.get(&claims.id).unwrap_or_default();
 
         if current_uses >= max_uses {
             warn!(

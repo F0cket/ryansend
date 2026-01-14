@@ -32,7 +32,7 @@ impl Default for AdminRateLimitConfig {
     fn default() -> Self {
         Self {
             // Allow 5 login attempts per minute
-            max_requests: NonZeroU32::new(5).unwrap(),
+            max_requests: NonZeroU32::new(5).expect("Rate limit max_requests must be non-zero"),
             window: Duration::from_secs(60),
         }
     }
@@ -43,7 +43,8 @@ impl AdminRateLimitConfig {
     pub fn for_login() -> Self {
         Self {
             // Allow only 5 login attempts per minute
-            max_requests: NonZeroU32::new(5).unwrap(),
+            max_requests: NonZeroU32::new(5)
+                .expect("Login rate limit max_requests must be non-zero"),
             window: Duration::from_secs(60),
         }
     }
