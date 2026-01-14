@@ -259,8 +259,6 @@ jobs:
     steps:
       - checkout
       - extract_version
-      - setup_remote_docker:
-          docker_layer_caching: true
 
       - run:
           name: Extract tag version (if triggered by tag)
