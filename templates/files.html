@@ -2,7 +2,10 @@
 <html lang="en">
     <head>
         <meta charset="UTF-8" />
-        <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=yes"
+        />
         <title>RyanSend Admin - File Browser</title>
         <style>
             body {
@@ -154,6 +157,7 @@
                 display: flex;
                 align-items: center;
                 gap: 8px;
+                flex-wrap: wrap;
             }
             .note-input {
                 padding: 0.25rem 0.5rem;
@@ -161,10 +165,173 @@
                 border-radius: 3px;
                 font-size: 0.75rem;
                 width: 120px;
+                min-width: 80px;
             }
             .note-input:focus {
                 outline: none;
                 border-color: #007bff;
+            }
+
+            /* Mobile responsive styles */
+            @media (max-width: 768px) {
+                body {
+                    padding: 10px;
+                }
+
+                .header {
+                    flex-direction: column;
+                    gap: 10px;
+                    text-align: center;
+                }
+
+                .header h1 {
+                    font-size: 1.2rem;
+                }
+
+                .header-actions {
+                    flex-direction: column;
+                    gap: 8px;
+                }
+
+                .file-browser {
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                table {
+                    min-width: 600px;
+                }
+
+                .actions {
+                    min-width: 200px;
+                }
+
+                .action-form {
+                    flex-direction: column;
+                    gap: 4px;
+                    align-items: stretch;
+                }
+
+                .action-form form {
+                    width: 100%;
+                }
+
+                .btn {
+                    width: 100%;
+                    text-align: center;
+                }
+
+                .note-input {
+                    width: 100%;
+                    margin-top: 4px;
+                }
+
+                .file-name {
+                    max-width: 150px;
+                    overflow: hidden;
+                    text-overflow: ellipsis;
+                    white-space: nowrap;
+                }
+
+                .file-size {
+                    font-size: 0.7rem;
+                }
+
+                th,
+                td {
+                    padding: 0.5rem 0.25rem;
+                    font-size: 0.875rem;
+                }
+
+                .search-results {
+                    overflow-x: auto;
+                    -webkit-overflow-scrolling: touch;
+                }
+
+                .search-form {
+                    flex-direction: column;
+                    gap: 8px;
+                }
+
+                .search-input {
+                    width: 100%;
+                }
+            }
+
+            @media (max-width: 480px) {
+                body {
+                    padding: 5px;
+                }
+
+                table {
+                    min-width: 450px;
+                    font-size: 0.8rem;
+                }
+
+                .actions {
+                    min-width: 160px;
+                }
+
+                .note-input {
+                    font-size: 0.7rem;
+                    padding: 0.2rem 0.4rem;
+                }
+
+                .btn {
+                    font-size: 0.7rem;
+                    padding: 0.2rem 0.4rem;
+                    margin-bottom: 2px;
+                }
+
+                .file-name {
+                    max-width: 80px;
+                }
+
+                .file-size {
+                    font-size: 0.65rem;
+                }
+
+                th,
+                td {
+                    padding: 0.3rem 0.2rem;
+                }
+
+                .breadcrumb {
+                    padding: 0.5rem 1rem;
+                }
+
+                .search-container {
+                    padding: 1rem;
+                }
+
+                .header {
+                    padding: 0.5rem 1rem;
+                }
+
+                .logout-btn {
+                    padding: 0.4rem 0.8rem;
+                    font-size: 0.8rem;
+                }
+            }
+
+            /* Extra small screens */
+            @media (max-width: 320px) {
+                .actions {
+                    min-width: 140px;
+                }
+
+                .note-input {
+                    font-size: 0.65rem;
+                }
+
+                .btn {
+                    font-size: 0.65rem;
+                    padding: 0.15rem 0.3rem;
+                }
+
+                .file-name {
+                    max-width: 60px;
+                }
             }
             .parent-dir {
                 color: #6f42c1;
