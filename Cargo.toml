@@ -28,6 +28,14 @@ urlencoding = "2.1"
 governor = "0.6"
 timedmap = "1.0"
 hex = "0.4"
+url = "2.5"
+# TLS and certificate management dependencies
+rustls = "0.23"
+rustls-pemfile = "2.1"
+axum-server = { version = "0.7", features = ["tls-rustls"] }
+instant-acme = { version = "0.8", features = ["hyper-rustls"] }
+rcgen = "0.14.6"
+base64 = "0.22"
 
 [dev-dependencies]
 tempfile = "3.8"

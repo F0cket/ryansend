@@ -4,6 +4,7 @@ use argon2::{Argon2, PasswordHasher};
 use rand::prelude::*;
 use rusty_paseto::prelude::*;
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use tokio::fs;
 
@@ -15,6 +16,19 @@ pub struct Config {
     pub admin: Option<AdminConfig>,
     #[serde(default)]
     pub remove_kofi: bool,
+    #[serde(default)]
+    pub cert: Option<CertConfig>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct CertConfig {
+    pub port: Option<u16>,
+    pub cert: Option<String>,
+    pub key: Option<String>,
+    pub expiry: Option<String>,
+    pub acme_email: Option<String>,
+    #[serde(default)]
+    pub is_letsencrypt: bool, // true if current cert is from Let's Encrypt
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -23,6 +37,55 @@ pub struct AdminConfig {
     pub port: u16,
     pub password: String,
     pub sharing_root: String,
+    #[serde(default)]
+    pub tls_port: Option<u16>,
+}
+
+impl Config {
+    /// Check if TLS certificate is configured
+    pub fn has_tls_cert(&self) -> bool {
+        self.cert
+            .as_ref()
+            .map(|c| c.cert.is_some() && c.key.is_some())
+            .unwrap_or(false)
+    }
+
+    /// Check if certificate renewal is needed (within 30 days of expiry)
+    pub fn is_cert_renewal_needed(&self) -> bool {
+        if let Some(cert_config) = &self.cert {
+            if let Some(expiry_str) = &cert_config.expiry {
+                if let Ok(expiry) = chrono::DateTime::parse_from_rfc3339(expiry_str) {
+                    let now = chrono::Utc::now();
+                    let days_until_expiry = (expiry.with_timezone(&chrono::Utc) - now).num_days();
+                    return days_until_expiry < 30;
+                }
+            }
+        }
+        false
+    }
+
+    /// Extract domain from base_url for certificate generation
+    pub fn get_domain(&self) -> Result<String> {
+        let url = Url::parse(&self.base_url)
+            .map_err(|e| anyhow!("Invalid base_url '{}': {}", self.base_url, e))?;
+
+        let host = url
+            .host_str()
+            .ok_or_else(|| anyhow!("No host found in base_url: {}", self.base_url))?;
+
+        // Remove port if present (e.g., "example.com:3000" -> "example.com")
+        let domain = host.split(':').next().unwrap_or(host);
+
+        // Don't allow localhost or IP addresses for Let's Encrypt
+        if domain == "localhost" || domain.parse::<std::net::IpAddr>().is_ok() {
+            return Err(anyhow!(
+                "Domain '{}' is not suitable for Let's Encrypt certificates. Use a proper domain name.",
+                domain
+            ));
+        }
+
+        Ok(domain.to_string())
+    }
 }
 
 pub fn get_config_file_path() -> String {
@@ -69,6 +132,34 @@ pub async fn load_config() -> Result<Config> {
     if let Ok(env_admin_port) = std::env::var("RYANSEND_ADMIN_PORT") {
         if let Some(ref mut admin) = config.admin {
             admin.port = env_admin_port.parse().unwrap_or(admin.port);
+        }
+    }
+
+    // Override TLS port with environment variable if present
+    if let Ok(env_tls_port) = std::env::var("RYANSEND_TLS_PORT") {
+        let port = env_tls_port.parse().ok();
+        if let Some(cert_config) = &mut config.cert {
+            cert_config.port = port;
+        } else if port.is_some() {
+            config.cert = Some(CertConfig {
+                port,
+                cert: None,
+                key: None,
+                expiry: None,
+                acme_email: None,
+                is_letsencrypt: false,
+            });
+        }
+    }
+
+    // Override admin TLS port with environment variable if present
+    if let Ok(env_admin_tls_port) = std::env::var("RYANSEND_ADMIN_TLS_PORT") {
+        if let Some(ref mut admin) = config.admin {
+            admin.tls_port = Some(
+                env_admin_tls_port
+                    .parse()
+                    .unwrap_or(admin.tls_port.unwrap_or(3444)),
+            );
         }
     }
 
@@ -121,12 +212,23 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         .and_then(|port_str| port_str.parse().ok())
         .unwrap_or(3001);
 
+    // Use environment variable for admin TLS port if provided
+    let admin_tls_port = std::env::var("RYANSEND_ADMIN_TLS_PORT")
+        .ok()
+        .and_then(|port_str| port_str.parse().ok());
+
     let admin_config = AdminConfig {
         enabled: default_admin_enabled,
         port: admin_port,
         password: password_hash,
         sharing_root: ".".to_string(),
+        tls_port: admin_tls_port,
     };
+
+    // Use environment variable for TLS port if provided
+    let tls_port = std::env::var("RYANSEND_TLS_PORT")
+        .ok()
+        .and_then(|port_str| port_str.parse().ok());
 
     let config = Config {
         base_url: base_url.clone(),
@@ -134,6 +236,14 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         secret_key: paserk_string.clone(),
         admin: Some(admin_config),
         remove_kofi: false,
+        cert: tls_port.map(|port| CertConfig {
+            port: Some(port),
+            cert: None,
+            key: None,
+            expiry: None,
+            acme_email: None,
+            is_letsencrypt: false,
+        }),
     };
 
     let config_path = get_config_file_path();
@@ -196,6 +306,23 @@ pub async fn update_admin_password(new_password: &str) -> Result<()> {
 
     Ok(())
 }
+
+/// Save the current config to the config file
+pub async fn save_config(config: &Config) -> Result<()> {
+    let config_content =
+        serde_yaml::to_string(config).map_err(|e| anyhow!("Failed to serialize config: {}", e))?;
+
+    let config_path = get_config_file_path();
+    fs::write(&config_path, config_content)
+        .await
+        .map_err(|e| anyhow!("Failed to write {}: {}", config_path, e))?;
+
+    log::info!("✅ Configuration saved to {}", config_path);
+    Ok(())
+}
+
+/// Update config with environment variables preserved
+/// This ensures that if env vars are set during config generation, they get written to the file
 
 #[cfg(test)]
 mod tests {
@@ -268,5 +395,174 @@ remove_kofi: false
             .unwrap_or(3001);
 
         assert_eq!(default_port, 3001);
+    }
+
+    #[tokio::test]
+    async fn test_tls_port_env_vars() {
+        // Set up a test config content
+        let test_config = r#"
+base_url: "http://localhost:3000"
+port: 3000
+secret_key: "test-key"
+admin:
+  enabled: true
+  port: 3001
+  password: "test-password"
+  sharing_root: "."
+remove_kofi: false
+"#;
+
+        // Parse the config
+        let mut config: Config =
+            serde_yaml::from_str(test_config).expect("Failed to parse test config YAML");
+
+        // Set the TLS environment variables
+        env::set_var("RYANSEND_TLS_PORT", "8443");
+        env::set_var("RYANSEND_ADMIN_TLS_PORT", "8444");
+
+        // Simulate the environment variable override logic from load_config
+        if let Ok(env_tls_port) = env::var("RYANSEND_TLS_PORT") {
+            config.tls_port = Some(
+                env_tls_port
+                    .parse()
+                    .unwrap_or(config.tls_port.unwrap_or(3443)),
+            );
+        }
+
+        if let Ok(env_admin_tls_port) = env::var("RYANSEND_ADMIN_TLS_PORT") {
+            if let Some(ref mut admin) = config.admin {
+                admin.tls_port = Some(
+                    env_admin_tls_port
+                        .parse()
+                        .unwrap_or(admin.tls_port.unwrap_or(3444)),
+                );
+            }
+        }
+
+        // Verify the ports were set correctly
+        assert_eq!(config.tls_port, Some(8443));
+        assert_eq!(
+            config
+                .admin
+                .as_ref()
+                .expect("Admin config should be present")
+                .tls_port,
+            Some(8444)
+        );
+
+        // Clean up
+        env::remove_var("RYANSEND_TLS_PORT");
+        env::remove_var("RYANSEND_ADMIN_TLS_PORT");
+    }
+
+    #[test]
+    fn test_get_domain() {
+        let config = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: None,
+        };
+
+        assert_eq!(config.get_domain().unwrap(), "example.com");
+
+        let config_with_port = Config {
+            base_url: "https://example.com:8080".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: None,
+        };
+
+        assert_eq!(config_with_port.get_domain().unwrap(), "example.com");
+
+        let config_localhost = Config {
+            base_url: "http://localhost:3000".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: None,
+        };
+
+        assert!(config_localhost.get_domain().is_err());
+    }
+
+    #[test]
+    fn test_has_tls_cert() {
+        let config_no_cert = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: None,
+        };
+
+        assert!(!config_no_cert.has_tls_cert());
+
+        let config_with_cert = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: Some(CertConfig {
+                port: None,
+                cert: Some("cert-data".to_string()),
+                key: Some("key-data".to_string()),
+                expiry: None,
+                acme_email: None,
+                is_letsencrypt: false,
+            }),
+        };
+
+        assert!(config_with_cert.has_tls_cert());
+    }
+
+    #[test]
+    fn test_cert_renewal_needed() {
+        let now = chrono::Utc::now();
+        let future_expiry = now + chrono::Duration::days(10);
+        let near_expiry = now + chrono::Duration::hours(24);
+
+        let config_future = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: Some(CertConfig {
+                port: None,
+                cert: Some("cert-data".to_string()),
+                key: Some("key-data".to_string()),
+                expiry: Some(future_expiry.to_rfc3339()),
+                acme_email: None,
+                is_letsencrypt: false,
+            }),
+        };
+
+        assert!(!config_future.is_cert_renewal_needed());
+
+        let config_near = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            cert: Some(CertConfig {
+                port: None,
+                cert: Some("cert-data".to_string()),
+                key: Some("key-data".to_string()),
+                expiry: Some(near_expiry.to_rfc3339()),
+                acme_email: None,
+                is_letsencrypt: false,
+            }),
+        };
+
+        assert!(config_near.is_cert_renewal_needed());
     }
 }

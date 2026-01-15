@@ -1,0 +1,520 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <meta
+            name="viewport"
+            content="width=device-width, initial-scale=1.0, user-scalable=yes"
+        />
+        <title>RyanSend Admin - Setup</title>
+        <style>
+            body {
+                font-family:
+                    -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+                    sans-serif;
+                background-color: #f8f9fa;
+                margin: 0;
+                padding: 20px;
+                color: #333;
+            }
+            .header {
+                background: white;
+                padding: 1rem 2rem;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+                margin-bottom: 20px;
+                display: flex;
+                justify-content: space-between;
+                align-items: center;
+            }
+            .header h1 {
+                margin: 0;
+                color: #333;
+                font-size: 1.5rem;
+            }
+            .header-actions {
+                display: flex;
+                align-items: center;
+                gap: 10px;
+            }
+            .nav-btn {
+                background: #007bff;
+                color: white;
+                border: none;
+                padding: 0.5rem 1rem;
+                border-radius: 4px;
+                text-decoration: none;
+                font-size: 0.875rem;
+            }
+            .nav-btn:hover {
+                background: #0056b3;
+            }
+            .logout-btn {
+                background: #dc3545;
+                color: white;
+                border: none;
+                padding: 0.5rem 1rem;
+                border-radius: 4px;
+                text-decoration: none;
+                font-size: 0.875rem;
+            }
+            .logout-btn:hover {
+                background: #c82333;
+            }
+            .container {
+                max-width: 900px;
+                margin: 0 auto;
+                background: white;
+                padding: 2rem;
+                border-radius: 8px;
+                box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            }
+            .success-message {
+                background: #d4edda;
+                border: 1px solid #c3e6cb;
+                color: #155724;
+                padding: 1rem;
+                border-radius: 4px;
+                margin-bottom: 1.5rem;
+            }
+            .error-message {
+                background: #f8d7da;
+                border: 1px solid #f5c6cb;
+                color: #721c24;
+                padding: 1rem;
+                border-radius: 4px;
+                margin-bottom: 1.5rem;
+            }
+            .form-section {
+                margin-bottom: 2rem;
+                padding-bottom: 2rem;
+                border-bottom: 1px solid #e9ecef;
+            }
+            .form-section:last-child {
+                border-bottom: none;
+                margin-bottom: 0;
+                padding-bottom: 0;
+            }
+            .form-section h2 {
+                margin-top: 0;
+                margin-bottom: 0.5rem;
+                color: #495057;
+                font-size: 1.25rem;
+            }
+            .form-section p {
+                margin: 0 0 1rem 0;
+                color: #6c757d;
+                font-size: 0.875rem;
+            }
+            .form-group {
+                margin-bottom: 1.5rem;
+            }
+            .form-group label {
+                display: block;
+                margin-bottom: 0.5rem;
+                font-weight: 600;
+                color: #495057;
+            }
+            .form-group .help-text {
+                display: block;
+                margin-top: 0.25rem;
+                font-size: 0.875rem;
+                color: #6c757d;
+            }
+            .form-group input[type="text"],
+            .form-group input[type="number"],
+            .form-group input[type="email"] {
+                width: 100%;
+                padding: 0.5rem;
+                border: 1px solid #ced4da;
+                border-radius: 4px;
+                font-size: 1rem;
+                box-sizing: border-box;
+            }
+            .form-group input[type="checkbox"] {
+                width: auto;
+                margin-right: 0.5rem;
+            }
+            .checkbox-label {
+                display: flex;
+                align-items: center;
+                font-weight: normal;
+            }
+            .form-group input:focus {
+                outline: none;
+                border-color: #80bdff;
+                box-shadow: 0 0 0 0.2rem rgba(0, 123, 255, 0.25);
+            }
+            .env-override {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                padding: 0.5rem;
+                border-radius: 4px;
+                margin-top: 0.5rem;
+                font-size: 0.875rem;
+                color: #856404;
+            }
+            .warning-box {
+                background: #fff3cd;
+                border: 1px solid #ffeaa7;
+                padding: 1rem;
+                border-radius: 4px;
+                margin-bottom: 1.5rem;
+                color: #856404;
+            }
+            .warning-box strong {
+                display: block;
+                margin-bottom: 0.5rem;
+            }
+            .button-group {
+                display: flex;
+                gap: 1rem;
+                margin-top: 2rem;
+            }
+            .btn {
+                padding: 0.75rem 1.5rem;
+                border: none;
+                border-radius: 4px;
+                font-size: 1rem;
+                cursor: pointer;
+                text-decoration: none;
+                display: inline-block;
+            }
+            .btn-primary {
+                background: #007bff;
+                color: white;
+            }
+            .btn-primary:hover {
+                background: #0056b3;
+            }
+            .btn-secondary {
+                background: #6c757d;
+                color: white;
+            }
+            .btn-secondary:hover {
+                background: #545b62;
+            }
+        </style>
+    </head>
+    <body>
+        <div class="header">
+            <h1>🔧 RyanSend Setup</h1>
+            <div class="header-actions">
+                <a href="/admin/files" class="nav-btn">📁 Files</a>
+                <form
+                    method="POST"
+                    action="/admin/restart"
+                    style="display: inline; margin: 0"
+                >
+                    <button
+                        type="submit"
+                        class="nav-btn"
+                        style="cursor: pointer"
+                    >
+                        🔄 Restart Server
+                    </button>
+                </form>
+                <a href="/admin/logout" class="logout-btn">Logout</a>
+            </div>
+        </div>
+
+        <div class="container">
+            {% if success %}
+            <div class="success-message">
+                ✓ Configuration saved successfully! Changes will take effect
+                after restarting the server.
+            </div>
+            {% endif %} {% if error != "" %}
+            <div class="error-message">✗ {{ error }}</div>
+            {% endif %}
+
+            <form method="POST" action="/admin/setup">
+                <div class="form-section">
+                    <h2>🌐 Server Configuration</h2>
+                    <p>Basic server settings</p>
+
+                    <div class="form-group">
+                        <label for="base_url">Base URL</label>
+                        <input
+                            type="text"
+                            id="base_url"
+                            name="base_url"
+                            value="{{ base_url }}"
+                            required
+                        />
+                        <span class="help-text"
+                            >The public URL where this server is accessible
+                            (e.g., https://example.com)</span
+                        >
+                    </div>
+
+                    <div class="form-group">
+                        <label for="port">HTTP Port</label>
+                        <input
+                            type="number"
+                            id="port"
+                            name="port"
+                            value="{{ port }}"
+                            required
+                            min="1"
+                            max="65535"
+                        />
+                        <span class="help-text"
+                            >Port for HTTP server (default: 3000). For Let's
+                            Encrypt: must be 80, or configure a reverse proxy to
+                            forward port 80 to this port.</span
+                        >
+                        {% if port_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by RYANSEND_PORT
+                            environment variable
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input
+                                type="checkbox"
+                                name="remove_kofi"
+                                {%
+                                if
+                                remove_kofi
+                                %}checked{%
+                                endif
+                                %}
+                            />
+                            Remove Ko-fi link from file browser
+                        </label>
+                        <span class="help-text"
+                            >Hide the Ko-fi support link from download
+                            pages</span
+                        >
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2>👤 Admin Panel Configuration</h2>
+                    <p>Settings for the admin interface</p>
+
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input
+                                type="checkbox"
+                                name="admin_enabled"
+                                {%
+                                if
+                                admin_enabled
+                                %}checked{%
+                                endif
+                                %}
+                            />
+                            Enable admin panel
+                        </label>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="admin_port">Admin Port</label>
+                        <input
+                            type="number"
+                            id="admin_port"
+                            name="admin_port"
+                            value="{{ admin_port }}"
+                            min="1"
+                            max="65535"
+                        />
+                        <span class="help-text"
+                            >Port for admin panel (default: 3001)</span
+                        >
+                        {% if admin_port_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by RYANSEND_ADMIN_PORT
+                            environment variable
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="form-group">
+                        <label for="admin_sharing_root"
+                            >Sharing Root Directory</label
+                        >
+                        <input
+                            type="text"
+                            id="admin_sharing_root"
+                            name="admin_sharing_root"
+                            value="{{ admin_sharing_root }}"
+                        />
+                        <span class="help-text"
+                            >Root directory for file sharing (e.g.,
+                            /home/user/files)</span
+                        >
+                        {% if admin_sharing_root_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by
+                            RYANSEND_ADMIN_SHARING_ROOT environment variable
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    <div class="warning-box">
+                        <strong>Password Management</strong>
+                        To change the admin password, use the command:
+                        <code>ryansend set-password</code>
+                    </div>
+                </div>
+
+                <div class="form-section">
+                    <h2>🔒 TLS / HTTPS Configuration</h2>
+                    <p>Configure HTTPS and certificates</p>
+
+                    <div class="form-group">
+                        <label for="tls_port">HTTPS Port</label>
+                        <input
+                            type="number"
+                            id="tls_port"
+                            name="tls_port"
+                            value="{{ tls_port }}"
+                            min="1"
+                            max="65535"
+                            placeholder="443"
+                        />
+                        <span class="help-text"
+                            >Port for HTTPS server (leave empty to disable TLS).
+                            Common: 443</span
+                        >
+                        {% if tls_port_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by RYANSEND_TLS_PORT
+                            environment variable
+                        </div>
+                        {% endif %}
+                    </div>
+
+                    {% if tls_cert_expiry != "" %}
+                    <div class="form-group">
+                        <label>Certificate Status</label>
+                        <div
+                            style="
+                                padding: 0.5rem;
+                                background: #e7f5ff;
+                                border: 1px solid #a5d8ff;
+                                border-radius: 4px;
+                            "
+                        >
+                            📜 Certificate installed {% if is_letsencrypt
+                            %}(Let's Encrypt){% else %}(Manual){% endif %},
+                            expires: <strong>{{ tls_cert_expiry }}</strong>
+                        </div>
+                    </div>
+                    {% endif %} {% if is_letsencrypt %}
+                    <div class="form-group">
+                        <div
+                            style="
+                                padding: 0.75rem;
+                                background: #d4edda;
+                                border: 1px solid #c3e6cb;
+                                border-radius: 4px;
+                                color: #155724;
+                            "
+                        >
+                            ✅ Let's Encrypt is currently enabled for this
+                            domain. Certificates will be renewed automatically
+                            30 days before expiry.
+                        </div>
+                    </div>
+                    {% else %}
+                    <div class="form-group">
+                        <label class="checkbox-label">
+                            <input
+                                type="checkbox"
+                                id="request_letsencrypt"
+                                name="request_letsencrypt"
+                            />
+                            Request new Let's Encrypt certificate
+                        </label>
+                        <span class="help-text"
+                            >Check this to obtain a new Let's Encrypt
+                            certificate for this domain</span
+                        >
+                    </div>
+                    {% endif %}
+
+                    <div class="form-group" id="acme_email_group">
+                        <label for="tls_acme_email">ACME Email Address *</label>
+                        <input
+                            type="email"
+                            id="tls_acme_email"
+                            name="tls_acme_email"
+                            value="{{ tls_acme_email }}"
+                            placeholder="admin@example.com"
+                        />
+                        <span class="help-text"
+                            >Email for Let's Encrypt certificate notifications
+                            (required for Let's Encrypt)</span
+                        >
+                    </div>
+
+                    <div class="warning-box" id="letsencrypt_info">
+                        <strong>Let's Encrypt Requirements:</strong>
+                        <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0">
+                            <li>
+                                Base URL must be a valid domain (not localhost
+                                or IP address)
+                            </li>
+                            <li>
+                                <strong
+                                    >Port 80 must be accessible from the
+                                    internet</strong
+                                >
+                                for HTTP-01 challenge validation. Either set
+                                HTTP Port to 80 above, or configure a reverse
+                                proxy (nginx/Apache/Caddy) to forward external
+                                port 80 to your HTTP port.
+                            </li>
+                            <li>
+                                Certificates are renewed automatically 30 days
+                                before expiry
+                            </li>
+                            <li>
+                                Email address is required for important
+                                notifications
+                            </li>
+                        </ul>
+                    </div>
+
+                    <div class="form-group">
+                        <label for="admin_tls_port"
+                            >Admin Panel HTTPS Port</label
+                        >
+                        <input
+                            type="number"
+                            id="admin_tls_port"
+                            name="admin_tls_port"
+                            value="{{ admin_tls_port }}"
+                            min="1"
+                            max="65535"
+                            placeholder="3444"
+                        />
+                        <span class="help-text"
+                            >Port for admin panel HTTPS (leave empty for
+                            HTTP-only admin panel)</span
+                        >
+                        {% if admin_tls_port_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by
+                            RYANSEND_ADMIN_TLS_PORT environment variable
+                        </div>
+                        {% endif %}
+                    </div>
+                </div>
+
+                <div class="button-group">
+                    <button type="submit" class="btn btn-primary">
+                        💾 Save Configuration
+                    </button>
+                    <a href="/admin/files" class="btn btn-secondary">Cancel</a>
+                </div>
+            </form>
+        </div>
+    </body>
+</html>

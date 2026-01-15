@@ -8,16 +8,25 @@ mod config;
 mod error;
 mod rate_limit;
 mod server;
+mod tls;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
 use log::{error, info};
 use std::path::PathBuf;
+use std::sync::Arc;
+use tokio::sync::broadcast;
 
 use crate::admin::run_admin_server;
 use crate::auth::generate_url;
 use crate::config::{init_config, load_config, update_admin_password};
 use crate::server::run_server;
+
+/// Signal to trigger server reload
+#[derive(Clone, Debug)]
+pub struct ReloadSignal;
+
+pub type ReloadSender = broadcast::Sender<ReloadSignal>;
 
 #[derive(Parser)]
 #[command(name = "ryansend")]
@@ -121,17 +130,77 @@ async fn main() -> Result<()> {
                 }
             }
 
-            let config = load_config().await?;
-            info!(
-                "Loaded config - base_url: {}, port: {}",
-                config.base_url, config.port
-            );
+            // Create reload channel
+            let (reload_tx, _) = broadcast::channel::<ReloadSignal>(1);
+            let reload_tx = Arc::new(reload_tx);
 
-            // Start both main server and admin server concurrently
-            let main_server = run_server(config.clone());
-            let admin_server = run_admin_server(config.clone());
+            // Server restart loop
+            loop {
+                // Track when we started the servers
+                let start_time = std::time::Instant::now();
 
-            tokio::try_join!(main_server, admin_server)?;
+                info!("🚀 Starting servers...");
+
+                let config = load_config().await?;
+                info!(
+                    "Loaded config - base_url: {}, port: {}",
+                    config.base_url, config.port
+                );
+
+                // Create reload receiver for this iteration
+                let mut reload_rx = reload_tx.subscribe();
+                let reload_tx_clone = Arc::clone(&reload_tx);
+
+                // Create shared challenge store for ACME HTTP-01 challenges
+                let challenge_store =
+                    Arc::new(tokio::sync::Mutex::new(std::collections::HashMap::new()));
+
+                // Start both main server and admin server concurrently
+                let main_server = run_server(
+                    config.clone(),
+                    reload_rx.resubscribe(),
+                    challenge_store.clone(),
+                );
+                let admin_server =
+                    run_admin_server(config.clone(), reload_tx_clone, challenge_store.clone());
+
+                // Wait for either server to finish or reload signal
+                let should_backoff = tokio::select! {
+                    result = main_server => {
+                        if let Err(e) = result {
+                            error!("Main server error: {}", e);
+                            return Err(e);
+                        }
+                        true // Server exited, might be a crash
+                    }
+                    result = admin_server => {
+                        if let Err(e) = result {
+                            error!("Admin server error: {}", e);
+                            return Err(e);
+                        }
+                        true // Server exited, might be a crash
+                    }
+                    _ = reload_rx.recv() => {
+                        info!("🔄 Reload signal received, shutting down servers...");
+                        false // Intentional restart, no backoff needed
+                    }
+                };
+
+                // Servers are now shut down. If they crashed within 30 seconds, wait before restarting
+                if should_backoff {
+                    let elapsed = start_time.elapsed();
+                    if elapsed.as_secs() < 30 {
+                        let wait_time = std::time::Duration::from_secs(30) - elapsed;
+                        error!(
+                            "Server stopped within 30 seconds. Waiting {:?} before restart to prevent crash loop...",
+                            wait_time
+                        );
+                        tokio::time::sleep(wait_time).await;
+                    }
+                }
+
+                // Loop continues and servers restart
+            }
         }
         Commands::Share { path, expires_in } => {
             let config = load_config().await?;

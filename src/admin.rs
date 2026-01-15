@@ -11,7 +11,7 @@ use axum::{
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use chrono::{Duration, Utc};
-use log::info;
+use log::{error, info};
 use rust_search::{similarity_sort, SearchBuilder};
 use rusty_paseto::prelude::*;
 use serde::Deserialize;
@@ -28,11 +28,14 @@ use crate::error::{handle_404, make_admin_error_response};
 use crate::rate_limit::{
     admin_login_rate_limit_middleware, create_rate_limiter, AdminRateLimitConfig, AdminRateLimiter,
 };
+use crate::ReloadSender;
 
 #[derive(Clone)]
 pub struct AdminAppState {
     pub config: Config,
     pub admin_login_rate_limiter: Option<Arc<AdminRateLimiter>>,
+    pub reload_tx: Arc<ReloadSender>,
+    pub challenge_store: crate::tls::ChallengeStore,
 }
 
 #[derive(Template)]
@@ -55,6 +58,29 @@ struct FileBrowserTemplate {
     remove_kofi: bool,
 }
 
+#[derive(Template)]
+#[template(path = "setup.html")]
+struct SetupTemplate {
+    base_url: String,
+    port: u16,
+    remove_kofi: bool,
+    admin_enabled: bool,
+    admin_port: u16,
+    admin_sharing_root: String,
+    tls_port: String,
+    tls_acme_email: String,
+    tls_cert_expiry: String,
+    is_letsencrypt: bool,
+    admin_tls_port: String,
+    port_env_override: bool,
+    admin_port_env_override: bool,
+    admin_sharing_root_env_override: bool,
+    tls_port_env_override: bool,
+    admin_tls_port_env_override: bool,
+    success: bool,
+    error: String,
+}
+
 #[derive(Clone)]
 struct FileEntry {
     name: String,
@@ -67,6 +93,20 @@ struct FileEntry {
 #[derive(Deserialize)]
 struct LoginForm {
     password: String,
+}
+
+#[derive(Deserialize)]
+struct SetupForm {
+    base_url: String,
+    port: u16,
+    remove_kofi: Option<String>,
+    admin_enabled: Option<String>,
+    admin_port: u16,
+    admin_sharing_root: String,
+    tls_port: Option<String>,
+    request_letsencrypt: Option<String>,
+    tls_acme_email: Option<String>,
+    admin_tls_port: Option<String>,
 }
 
 #[derive(Deserialize)]
@@ -646,10 +686,555 @@ async fn admin_logout_handler() -> Response {
     (cookies, axum::response::Redirect::to("/admin/login")).into_response()
 }
 
-pub async fn run_admin_server(config: Config) -> Result<()> {
+async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
+    let admin_config = state.config.admin.as_ref();
+
+    // Check for environment variable overrides
+    let port_env_override = std::env::var("RYANSEND_PORT").is_ok();
+    let admin_port_env_override = std::env::var("RYANSEND_ADMIN_PORT").is_ok();
+    let admin_sharing_root_env_override = std::env::var("RYANSEND_ADMIN_SHARING_ROOT").is_ok();
+    let tls_port_env_override = std::env::var("RYANSEND_TLS_PORT").is_ok();
+    let admin_tls_port_env_override = std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok();
+
+    let is_letsencrypt = state
+        .config
+        .cert
+        .as_ref()
+        .map(|c| c.is_letsencrypt)
+        .unwrap_or(false);
+
+    let template = SetupTemplate {
+        base_url: state.config.base_url.clone(),
+        port: state.config.port,
+        remove_kofi: state.config.remove_kofi,
+        admin_enabled: admin_config.map(|a| a.enabled).unwrap_or(false),
+        admin_port: admin_config.map(|a| a.port).unwrap_or(3001),
+        admin_sharing_root: admin_config
+            .map(|a| a.sharing_root.clone())
+            .unwrap_or_default(),
+        tls_port: state
+            .config
+            .cert
+            .as_ref()
+            .and_then(|c| c.port)
+            .map(|p| p.to_string())
+            .unwrap_or_default(),
+        tls_acme_email: state
+            .config
+            .cert
+            .as_ref()
+            .and_then(|c| c.acme_email.clone())
+            .unwrap_or_default(),
+        tls_cert_expiry: state
+            .config
+            .cert
+            .as_ref()
+            .and_then(|c| c.expiry.clone())
+            .unwrap_or_default(),
+        is_letsencrypt,
+        admin_tls_port: admin_config
+            .and_then(|a| a.tls_port)
+            .map(|p| p.to_string())
+            .unwrap_or_default(),
+        port_env_override,
+        admin_port_env_override,
+        admin_sharing_root_env_override,
+        tls_port_env_override,
+        admin_tls_port_env_override,
+        success: false,
+        error: String::new(),
+    };
+
+    Html(
+        template
+            .render()
+            .unwrap_or_else(|_| "Template error".to_string()),
+    )
+}
+
+async fn admin_setup_handler(
+    State(state): State<AdminAppState>,
+    Form(form): Form<SetupForm>,
+) -> Response {
+    // Helper function to create error response
+    let make_error_response = |config: &crate::config::Config, error_msg: String| {
+        let admin_config = config.admin.as_ref();
+        let is_letsencrypt = config
+            .cert
+            .as_ref()
+            .map(|c| c.is_letsencrypt)
+            .unwrap_or(false);
+
+        let template = SetupTemplate {
+            base_url: config.base_url.clone(),
+            port: config.port,
+            remove_kofi: config.remove_kofi,
+            admin_enabled: admin_config.map(|a| a.enabled).unwrap_or(false),
+            admin_port: admin_config.map(|a| a.port).unwrap_or(3001),
+            admin_sharing_root: admin_config
+                .map(|a| a.sharing_root.clone())
+                .unwrap_or_default(),
+            tls_port: config
+                .cert
+                .as_ref()
+                .and_then(|c| c.port)
+                .map(|p| p.to_string())
+                .unwrap_or_default(),
+            tls_acme_email: config
+                .cert
+                .as_ref()
+                .and_then(|c| c.acme_email.clone())
+                .unwrap_or_default(),
+            tls_cert_expiry: config
+                .cert
+                .as_ref()
+                .and_then(|c| c.expiry.clone())
+                .unwrap_or_default(),
+            is_letsencrypt,
+            admin_tls_port: admin_config
+                .and_then(|a| a.tls_port)
+                .map(|p| p.to_string())
+                .unwrap_or_default(),
+            port_env_override: std::env::var("RYANSEND_PORT").is_ok(),
+            admin_port_env_override: std::env::var("RYANSEND_ADMIN_PORT").is_ok(),
+            admin_sharing_root_env_override: std::env::var("RYANSEND_ADMIN_SHARING_ROOT").is_ok(),
+            tls_port_env_override: std::env::var("RYANSEND_TLS_PORT").is_ok(),
+            admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
+            success: false,
+            error: error_msg,
+        };
+        let html = template
+            .render()
+            .unwrap_or_else(|_| "Template error".to_string());
+        Response::builder()
+            .status(StatusCode::OK)
+            .header("content-type", "text/html")
+            .body(Body::from(html))
+            .expect("Failed to build response")
+    };
+
+    // Load the current config
+    let mut config = match crate::config::load_config().await {
+        Ok(c) => c,
+        Err(e) => {
+            // Create a minimal config for error display
+            let minimal_config = crate::config::Config {
+                base_url: form.base_url.clone(),
+                port: form.port,
+                secret_key: String::new(),
+                admin: None,
+                remove_kofi: form.remove_kofi.is_some(),
+                cert: form
+                    .tls_port
+                    .as_ref()
+                    .and_then(|s| s.parse().ok())
+                    .map(|port| crate::config::CertConfig {
+                        port: Some(port),
+                        cert: None,
+                        key: None,
+                        expiry: None,
+                        acme_email: form.tls_acme_email.clone(),
+                        is_letsencrypt: false,
+                    }),
+            };
+            return make_error_response(&minimal_config, format!("Failed to load config: {}", e));
+        }
+    };
+
+    // Update basic config
+    config.base_url = form.base_url.clone();
+    config.port = form.port;
+    config.remove_kofi = form.remove_kofi.is_some();
+
+    // Update admin config
+    if let Some(ref mut admin) = config.admin {
+        admin.enabled = form.admin_enabled.is_some();
+        admin.port = form.admin_port;
+        admin.sharing_root = form.admin_sharing_root.clone();
+        admin.tls_port = form.admin_tls_port.and_then(|s| s.parse().ok());
+    }
+
+    // Update TLS port
+    let tls_port = form.tls_port.and_then(|s| s.parse().ok());
+    if let Some(port) = tls_port {
+        if let Some(ref mut cert_config) = config.cert {
+            cert_config.port = Some(port);
+        } else {
+            config.cert = Some(crate::config::CertConfig {
+                port: Some(port),
+                cert: None,
+                key: None,
+                expiry: None,
+                acme_email: None,
+                is_letsencrypt: false,
+            });
+        }
+    }
+
+    // Handle certificate configuration
+    let request_letsencrypt = form.request_letsencrypt.is_some();
+
+    if request_letsencrypt {
+        // Let's Encrypt configuration
+        let acme_email = form.tls_acme_email.filter(|s| !s.trim().is_empty());
+
+        // Validate Let's Encrypt requirements
+        if acme_email.is_none() {
+            return make_error_response(
+                &config,
+                "ACME email is required for Let's Encrypt".to_string(),
+            );
+        }
+
+        // Validate base_url is a proper domain
+        let base_url = &form.base_url;
+        if base_url.contains("localhost") || base_url.contains("127.0.0.1") {
+            return make_error_response(
+                &config,
+                "Let's Encrypt cannot be used with localhost or IP addresses. Use a domain name."
+                    .to_string(),
+            );
+        }
+
+        // Check if base_url looks like a domain (has at least one dot)
+        if let Ok(url) = url::Url::parse(base_url) {
+            if let Some(host) = url.host_str() {
+                if !host.contains('.') || host.parse::<std::net::IpAddr>().is_ok() {
+                    return make_error_response(
+                        &config,
+                        "Let's Encrypt requires a valid domain name (not an IP address)"
+                            .to_string(),
+                    );
+                }
+            }
+        } else {
+            return make_error_response(&config, "Invalid base URL format".to_string());
+        }
+
+        if let Some(ref mut cert_config) = config.cert {
+            cert_config.acme_email = acme_email.clone();
+            cert_config.is_letsencrypt = false; // Will be set to true after successful cert request
+        } else {
+            config.cert = Some(crate::config::CertConfig {
+                port: None,
+                cert: None,
+                key: None,
+                expiry: None,
+                acme_email: acme_email.clone(),
+                is_letsencrypt: false, // Will be set to true after successful cert request
+            });
+        }
+
+        // Store the email for later use in certificate request
+        let acme_email_for_cert = acme_email.unwrap();
+
+        // After saving config, trigger Let's Encrypt certificate request
+        info!("🔐 Let's Encrypt configured, will request certificate after saving config");
+
+        // Save config first
+        if let Err(e) = crate::config::save_config(&config).await {
+            return make_error_response(&config, format!("Failed to save config: {}", e));
+        }
+
+        // Now request the certificate
+        info!(
+            "📜 Starting Let's Encrypt certificate request for domain: {}",
+            form.base_url
+        );
+
+        let domain = match config.get_domain() {
+            Ok(d) => d,
+            Err(e) => {
+                return make_error_response(&config, format!("Failed to extract domain: {}", e));
+            }
+        };
+
+        // Use shared challenge store from state
+        let challenge_store = state.challenge_store.clone();
+        let acme_account_file = "data/acme_account.json";
+
+        // Ensure data directory exists
+        if let Err(e) = tokio::fs::create_dir_all("data").await {
+            return make_error_response(&config, format!("Failed to create data directory: {}", e));
+        }
+
+        info!("🌐 Requesting certificate from Let's Encrypt (this may take a minute)...");
+        info!("📧 Using email: {}", acme_email_for_cert);
+        info!("🔑 Domain: {}", domain);
+
+        match crate::tls::request_letsencrypt_cert(
+            &domain,
+            challenge_store,
+            false, // production
+            &acme_email_for_cert,
+            acme_account_file,
+        )
+        .await
+        {
+            Ok((cert_pem, key_pem, expiry)) => {
+                info!("✅ Certificate obtained successfully!");
+                info!("📅 Certificate expires: {}", expiry);
+
+                // Set TLS port to 443 if not already configured
+                if config.cert.as_ref().and_then(|c| c.port).is_none() {
+                    info!("📌 Setting TLS port to 443 (default HTTPS port)");
+                    if let Some(ref mut cert_config) = config.cert {
+                        cert_config.port = Some(443);
+                    }
+                }
+
+                // Mark certificate as Let's Encrypt
+                if let Some(ref mut cert_config) = config.cert {
+                    cert_config.is_letsencrypt = true;
+                }
+
+                // Save certificate to config
+                match crate::tls::save_cert_to_config(&mut config, &cert_pem, &key_pem, expiry)
+                    .await
+                {
+                    Ok(()) => {
+                        info!("💾 Certificate saved to config");
+                        info!("🔄 Triggering server restart to activate TLS certificate...");
+
+                        // Trigger server restart to activate the new certificate
+                        let reload_tx = Arc::clone(&state.reload_tx);
+                        tokio::spawn(async move {
+                            tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+                            info!("📤 Sending reload signal for TLS activation...");
+                            let _ = reload_tx.send(crate::ReloadSignal);
+                        });
+
+                        // Return success page with restart message
+                        let html = r#"<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Certificate Obtained - Restarting...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: #333;
+        }
+        .message {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+            max-width: 500px;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #28a745;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .success-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+    </style>
+    <meta http-equiv="refresh" content="5;url=/admin/setup">
+</head>
+<body>
+    <div class="message">
+        <div class="success-icon">✅</div>
+        <h2>Certificate Obtained Successfully!</h2>
+        <div class="spinner"></div>
+        <p>🔐 Let's Encrypt certificate has been saved to config.</p>
+        <p>🔄 Server is restarting to activate TLS on the HTTPS port...</p>
+        <p style="font-size: 0.875rem; color: #6c757d; margin-top: 1.5rem;">
+            You will be redirected to the setup page in a moment.
+        </p>
+    </div>
+</body>
+</html>"#;
+                        return Response::builder()
+                            .status(StatusCode::OK)
+                            .header("content-type", "text/html")
+                            .body(Body::from(html))
+                            .expect("Failed to build response");
+                    }
+                    Err(e) => {
+                        error!("❌ Failed to save certificate: {}", e);
+                        return make_error_response(
+                            &config,
+                            format!("Certificate obtained but failed to save: {}", e),
+                        );
+                    }
+                }
+            }
+            Err(e) => {
+                error!("❌ Failed to obtain Let's Encrypt certificate: {}", e);
+                return make_error_response(
+                    &config,
+                    format!("Failed to obtain Let's Encrypt certificate: {}. Make sure port 80 is accessible from the internet.", e),
+                );
+            }
+        }
+    }
+    // If not requesting Let's Encrypt, just keep existing config as-is
+
+    // Save the config
+    match crate::config::save_config(&config).await {
+        Ok(_) => {
+            let admin_config = config.admin.as_ref();
+            let is_letsencrypt = config
+                .cert
+                .as_ref()
+                .map(|c| c.is_letsencrypt)
+                .unwrap_or(false);
+
+            let template = SetupTemplate {
+                base_url: config.base_url.clone(),
+                port: config.port,
+                remove_kofi: config.remove_kofi,
+                admin_enabled: admin_config.map(|a| a.enabled).unwrap_or(false),
+                admin_port: admin_config.map(|a| a.port).unwrap_or(3001),
+                admin_sharing_root: admin_config
+                    .map(|a| a.sharing_root.clone())
+                    .unwrap_or_default(),
+                tls_port: config
+                    .cert
+                    .as_ref()
+                    .and_then(|c| c.port)
+                    .map(|p| p.to_string())
+                    .unwrap_or_default(),
+                tls_acme_email: config
+                    .cert
+                    .as_ref()
+                    .and_then(|c| c.acme_email.clone())
+                    .unwrap_or_default(),
+                tls_cert_expiry: config
+                    .cert
+                    .as_ref()
+                    .and_then(|c| c.expiry.clone())
+                    .unwrap_or_default(),
+                is_letsencrypt,
+                admin_tls_port: admin_config
+                    .and_then(|a| a.tls_port)
+                    .map(|p| p.to_string())
+                    .unwrap_or_default(),
+                port_env_override: std::env::var("RYANSEND_PORT").is_ok(),
+                admin_port_env_override: std::env::var("RYANSEND_ADMIN_PORT").is_ok(),
+                admin_sharing_root_env_override: std::env::var("RYANSEND_ADMIN_SHARING_ROOT")
+                    .is_ok(),
+                tls_port_env_override: std::env::var("RYANSEND_TLS_PORT").is_ok(),
+                admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
+                success: true,
+                error: String::new(),
+            };
+            let html = template
+                .render()
+                .unwrap_or_else(|_| "Template error".to_string());
+            Response::builder()
+                .status(StatusCode::OK)
+                .header("content-type", "text/html")
+                .body(Body::from(html))
+                .expect("Failed to build response")
+        }
+        Err(e) => make_error_response(&config, format!("Failed to save config: {}", e)),
+    }
+}
+
+async fn admin_restart_handler(State(state): State<AdminAppState>) -> Response {
+    info!("Server restart requested via admin panel");
+
+    let html = r#"<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Restarting Server...</title>
+    <style>
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: #f8f9fa;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            height: 100vh;
+            margin: 0;
+            color: #333;
+        }
+        .message {
+            background: white;
+            padding: 2rem;
+            border-radius: 8px;
+            box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
+            text-align: center;
+        }
+        .spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #007bff;
+            border-radius: 50%;
+            width: 40px;
+            height: 40px;
+            animation: spin 1s linear infinite;
+            margin: 1rem auto;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+    </style>
+    <meta http-equiv="refresh" content="5;url=/admin/files">
+</head>
+<body>
+    <div class="message">
+        <div class="spinner"></div>
+        <h2>🔄 Restarting Server...</h2>
+        <p>The server is restarting with the new configuration.</p>
+        <p>You will be redirected to the files page in a moment.</p>
+        <p style="font-size: 0.875rem; color: #6c757d;">This may take a few seconds...</p>
+    </div>
+</body>
+</html>"#;
+
+    // Send reload signal after a brief delay to allow response to be sent
+    let reload_tx = Arc::clone(&state.reload_tx);
+    tokio::spawn(async move {
+        tokio::time::sleep(tokio::time::Duration::from_millis(500)).await;
+        info!("Sending reload signal...");
+        let _ = reload_tx.send(crate::ReloadSignal);
+    });
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header("content-type", "text/html")
+        .body(Body::from(html))
+        .expect("Failed to build restart response")
+}
+
+pub async fn run_admin_server(
+    config: Config,
+    reload_tx: Arc<ReloadSender>,
+    challenge_store: crate::tls::ChallengeStore,
+) -> Result<()> {
+    // Subscribe to reload signal for graceful shutdown
+    let mut reload_rx = reload_tx.subscribe();
+
     let admin_config = match &config.admin {
         Some(admin) if admin.enabled => admin,
-        _ => return Ok(()), // Admin disabled, do nothing
+        _ => {
+            // Admin disabled, wait indefinitely for reload signal
+            let _ = reload_rx.recv().await;
+            return Ok(());
+        }
     };
 
     // Create rate limiter for login endpoint only (5 attempts per minute)
@@ -658,6 +1243,8 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
     let state = AdminAppState {
         config: config.clone(),
         admin_login_rate_limiter: Some(admin_login_rate_limiter),
+        reload_tx,
+        challenge_store,
     };
 
     let protected_routes = Router::new()
@@ -665,6 +1252,9 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         .route("/admin/download", get(admin_download_handler))
         .route("/admin/share", get(admin_share_handler))
         .route("/admin/single-use", get(admin_single_use_download_handler))
+        .route("/admin/setup", get(admin_setup_page))
+        .route("/admin/setup", post(admin_setup_handler))
+        .route("/admin/restart", post(admin_restart_handler))
         .route_layer(middleware::from_fn_with_state(
             state.clone(),
             admin_auth_middleware,
@@ -685,6 +1275,47 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         .fallback(handle_404)
         .with_state(state);
 
+    // Check if TLS is configured for admin panel
+    let has_admin_tls = config.has_tls_cert() && admin_config.tls_port.is_some();
+
+    if has_admin_tls {
+        // Load TLS certificate
+        match crate::tls::load_cert_from_config(&config)? {
+            Some(tls_cert) => {
+                let server_config = tls_cert.into_server_config()?;
+                let tls_port = admin_config.tls_port.unwrap();
+
+                info!("🔒 Starting admin server on https://0.0.0.0:{}", tls_port);
+
+                let bind_address = format!("0.0.0.0:{}", tls_port);
+
+                let https_server = axum_server::bind_rustls(
+                    bind_address.parse().unwrap(),
+                    axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(
+                        server_config,
+                    )),
+                )
+                .serve(app.into_make_service());
+
+                tokio::select! {
+                    result = https_server => {
+                        result.map_err(|e| anyhow::anyhow!("Admin HTTPS server error: {}", e))?;
+                    }
+                    _ = reload_rx.recv() => {
+                        info!("Admin server shutting down for reload...");
+                    }
+                }
+
+                return Ok(());
+            }
+            None => {
+                info!("⚠️  Admin TLS configured but certificate could not be loaded, falling back to HTTP");
+                // Fall through to HTTP-only mode
+            }
+        }
+    }
+
+    // HTTP-only mode
     info!(
         "Starting admin server on http://0.0.0.0:{}",
         admin_config.port
@@ -702,6 +1333,10 @@ pub async fn run_admin_server(config: Config) -> Result<()> {
         })?;
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            reload_rx.recv().await.ok();
+            info!("Admin server shutting down for reload...");
+        })
         .await
         .map_err(|e| anyhow::anyhow!("Admin server error: {}", e))?;
 

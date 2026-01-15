@@ -1,9 +1,9 @@
 use anyhow::{anyhow, Result};
 use axum::{
     body::Body,
-    extract::{Query, State},
+    extract::{Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
-    response::Response,
+    response::{IntoResponse, Response},
     routing::get,
     Router,
 };
@@ -21,6 +21,8 @@ use tokio_util::io::ReaderStream;
 use crate::auth::verify_token_and_get_claims;
 use crate::config::Config;
 use crate::error::{handle_404, AppError, AppResult};
+use crate::tls::{self, ChallengeStore};
+use crate::ReloadSignal;
 
 #[derive(Debug, Clone)]
 struct ByteRange {
@@ -84,11 +86,32 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<ByteRange> {
 pub struct AppState {
     pub config: Config,
     pub download_tracker: Arc<Mutex<TimedMap<String, u32>>>,
+    pub challenge_store: ChallengeStore,
 }
 
 #[derive(Deserialize)]
 pub struct DownloadQuery {
     token: String,
+}
+
+/// Handle ACME HTTP-01 challenge requests
+/// Path: /.well-known/acme-challenge/{token}
+pub async fn acme_challenge_handler(
+    State(state): State<AppState>,
+    Path(token): Path<String>,
+) -> impl IntoResponse {
+    debug!("ACME challenge request for token: {}", token);
+
+    match tls::serve_acme_challenge(&token, state.challenge_store).await {
+        Ok(key_auth) => {
+            info!("Serving ACME challenge for token: {}", token);
+            (StatusCode::OK, key_auth)
+        }
+        Err(e) => {
+            warn!("ACME challenge token not found: {} - {}", token, e);
+            (StatusCode::NOT_FOUND, "Challenge not found".to_string())
+        }
+    }
 }
 
 pub async fn download_handler(
@@ -288,35 +311,130 @@ pub async fn download_handler(
     Ok(response)
 }
 
-pub async fn run_server(config: Config) -> Result<()> {
+pub async fn run_server(
+    config: Config,
+    mut reload_rx: tokio::sync::broadcast::Receiver<ReloadSignal>,
+    challenge_store: tls::ChallengeStore,
+) -> Result<()> {
+    // Start certificate renewal background task
+    let _renewal_task = tls::start_renewal_task(config.clone(), challenge_store.clone());
+
     let state = AppState {
         config: config.clone(),
         download_tracker: Arc::new(Mutex::new(TimedMap::new())),
+        challenge_store: challenge_store.clone(),
     };
 
     let app = Router::new()
         .route("/download", get(download_handler))
+        .route(
+            "/.well-known/acme-challenge/:token",
+            get(acme_challenge_handler),
+        )
         .fallback(handle_404)
         .with_state(state);
 
-    info!("Starting server on http://0.0.0.0:{}", config.port);
+    // Check if TLS is configured
+    let has_tls = config.has_tls_cert() && config.cert.as_ref().and_then(|c| c.port).is_some();
 
-    // Show admin panel info if enabled
-    if let Some(admin_config) = &config.admin {
-        if admin_config.enabled {
-            info!(
-                "📋 Admin panel available at: http://localhost:{}/admin/login",
-                admin_config.port
-            );
+    if has_tls {
+        // Load TLS certificate
+        match tls::load_cert_from_config(&config)? {
+            Some(tls_cert) => {
+                let server_config = tls_cert.into_server_config()?;
+                let tls_port = config.cert.as_ref().and_then(|c| c.port).unwrap();
+
+                info!("🔒 Starting HTTPS server on https://0.0.0.0:{}", tls_port);
+                info!("🔓 Starting HTTP server on http://0.0.0.0:{}", config.port);
+
+                // Show admin panel info if enabled
+                if let Some(admin_config) = &config.admin {
+                    if admin_config.enabled {
+                        info!(
+                            "📋 Admin panel available at: http://localhost:{}/admin/login",
+                            admin_config.port
+                        );
+                    }
+                }
+
+                // Start HTTP server for ACME challenges
+                let http_bind_address = format!("0.0.0.0:{}", config.port);
+                let http_listener = tokio::net::TcpListener::bind(&http_bind_address)
+                    .await
+                    .map_err(|e| anyhow!("Failed to bind to HTTP port {}: {}", config.port, e))?;
+
+                // Start HTTPS server
+                let https_bind_address = format!("0.0.0.0:{}", tls_port);
+
+                // Clone app for both servers
+                let http_app = app.clone();
+                let https_app = app;
+
+                // Run both servers concurrently with graceful shutdown
+                let http_server = async move {
+                    axum::serve(http_listener, http_app)
+                        .with_graceful_shutdown(async move {
+                            reload_rx.recv().await.ok();
+                            info!("HTTP server shutting down for reload...");
+                        })
+                        .await
+                        .map_err(|e| anyhow!("HTTP server error: {}", e))
+                };
+
+                let https_server = async move {
+                    let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
+                        std::sync::Arc::new(server_config),
+                    );
+                    axum_server::bind_rustls(https_bind_address.parse().unwrap(), rustls_config)
+                        .serve(https_app.into_make_service())
+                        .await
+                        .map_err(|e| anyhow!("HTTPS server error: {}", e))
+                };
+
+                tokio::try_join!(http_server, https_server)?;
+                return Ok(());
+            }
+            None => {
+                warn!(
+                    "TLS configured but certificate could not be loaded, falling back to HTTP only"
+                );
+                // Fall through to HTTP-only mode
+                return run_http_only_server(config, app, reload_rx).await;
+            }
         }
-    }
+    } else {
+        info!("Starting server on http://0.0.0.0:{}", config.port);
 
+        // Show admin panel info if enabled
+        if let Some(admin_config) = &config.admin {
+            if admin_config.enabled {
+                info!(
+                    "📋 Admin panel available at: http://localhost:{}/admin/login",
+                    admin_config.port
+                );
+            }
+        }
+
+        return run_http_only_server(config, app, reload_rx).await;
+    }
+}
+
+/// Run HTTP-only server (fallback when TLS is not configured)
+async fn run_http_only_server(
+    config: Config,
+    app: Router,
+    mut reload_rx: tokio::sync::broadcast::Receiver<crate::ReloadSignal>,
+) -> Result<()> {
     let bind_address = format!("0.0.0.0:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&bind_address)
         .await
         .map_err(|e| anyhow!("Failed to bind to port {}: {}", config.port, e))?;
 
     axum::serve(listener, app)
+        .with_graceful_shutdown(async move {
+            reload_rx.recv().await.ok();
+            info!("HTTP server shutting down for reload...");
+        })
         .await
         .map_err(|e| anyhow!("Server error: {}", e))?;
 
