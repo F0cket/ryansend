@@ -323,7 +323,6 @@ pub async fn save_config(config: &Config) -> Result<()> {
 
 /// Update config with environment variables preserved
 /// This ensures that if env vars are set during config generation, they get written to the file
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -422,11 +421,19 @@ remove_kofi: false
 
         // Simulate the environment variable override logic from load_config
         if let Ok(env_tls_port) = env::var("RYANSEND_TLS_PORT") {
-            config.tls_port = Some(
-                env_tls_port
-                    .parse()
-                    .unwrap_or(config.tls_port.unwrap_or(3443)),
-            );
+            if config.cert.is_none() {
+                config.cert = Some(CertConfig {
+                    port: None,
+                    cert: None,
+                    key: None,
+                    expiry: None,
+                    acme_email: None,
+                    is_letsencrypt: false,
+                });
+            }
+            if let Some(ref mut cert) = config.cert {
+                cert.port = Some(env_tls_port.parse().unwrap_or(cert.port.unwrap_or(3443)));
+            }
         }
 
         if let Ok(env_admin_tls_port) = env::var("RYANSEND_ADMIN_TLS_PORT") {
@@ -440,7 +447,14 @@ remove_kofi: false
         }
 
         // Verify the ports were set correctly
-        assert_eq!(config.tls_port, Some(8443));
+        assert_eq!(
+            config
+                .cert
+                .as_ref()
+                .expect("Cert config should be present")
+                .port,
+            Some(8443)
+        );
         assert_eq!(
             config
                 .admin
@@ -526,8 +540,8 @@ remove_kofi: false
     #[test]
     fn test_cert_renewal_needed() {
         let now = chrono::Utc::now();
-        let future_expiry = now + chrono::Duration::days(10);
-        let near_expiry = now + chrono::Duration::hours(24);
+        let future_expiry = now + chrono::Duration::days(31); // More than 30 days, no renewal needed
+        let near_expiry = now + chrono::Duration::days(10); // Less than 30 days, renewal needed
 
         let config_future = Config {
             base_url: "https://example.com".to_string(),
