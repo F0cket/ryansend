@@ -1262,7 +1262,7 @@ pub async fn run_admin_server(
 
                 let bind_address = format!("0.0.0.0:{}", tls_port);
 
-                let addr = match bind_address.parse() {
+                let addr: std::net::SocketAddr = match bind_address.parse() {
                     Ok(addr) => addr,
                     Err(e) => {
                         error!(

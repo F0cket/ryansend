@@ -394,7 +394,7 @@ pub async fn run_server(
                     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
                         std::sync::Arc::new(server_config),
                     );
-                    let addr = match https_bind_address.parse() {
+                    let addr: std::net::SocketAddr = match https_bind_address.parse() {
                         Ok(addr) => addr,
                         Err(e) => {
                             error!(
