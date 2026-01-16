@@ -59,7 +59,7 @@ It should load a bunch of settings for you. The main thing to change are:
 
 #### Cloudflare
 
-If you do cloudflare, you can use either of these to get yourself a DNS (if you own/buy a domain and run it through cloudflare):
+If you do cloudflare, you can use either of these to get DNS set up (if you own/buy a domain and run it through cloudflare):
 1. https://github.com/IPGPrometheus/Cloudflared-Unraid (this is great because it can provide https and forward to port 3000!)
 2. https://github.com/oznu/docker-cloudflare-ddns or a similar ddns image
 
@@ -88,6 +88,24 @@ docker run -d --name ryansend -p 3000:3000 -p 3001:3001 -v /mnt/user/appdata/rya
 ```
 
 This example works great on unraid, but should work in many docker setups. It will set up two mounts to the host: the appdata one so your config.yaml persists even if you upgrade the image later, and the /mnt/user as the root shared directory. You will probably want to adjust that to something like `/mnt/user/media` or something if you don't really want the admin interface to be bothered with data from random other apps.
+
+## TLS / HTTPS
+
+There are three suggested ways to get secure connections:
+
+- **cloudflared**: If you do cloudflare, you can use something like Cloudflared-Unraid, or a similar manual setup with cloudflared.
+  - This is often really easy!
+  - No need to forward ports at the router! - Great for security or if you have something using those ports already.
+  - Downsides: vague speed limit (probably not as fast as direct connection)
+- **lets-encrypt**: ryansend now has beta support for automatic cert management!
+  - The new admin setup page lets you check a box and it will try to provision a cert matching your base URL.
+  - You have to point your DNS at your up, then forward your public IP address's port 80 to ryansend's main port first.
+  - Automatic cert renewal is automatically handled! (currently alpha)
+  - Its a little finicky. May require you to change ports, then press the restart button, _then_ click the box to start the lets-encrypt process. Not a lot of visibility if any issues happen.
+- **manual**: Drop a cert.pem and key.pem file in the appdata directory and configure a TLS port!
+  - Great if you want faster speed than cloudflared, but want to use a different provider or self signed certs.
+  - If you want to use manual SSL certificates, you can use a tool like [certbot](https://certbot.eff.org/) or [acme.sh](https://github.com/acmesh-official/acme.sh).
+
 
 ## Contributing
 
