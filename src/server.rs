@@ -3,6 +3,7 @@ use axum::{
     body::Body,
     extract::{Path, Query, State},
     http::{header, HeaderMap, HeaderValue, StatusCode},
+    middleware,
     response::{IntoResponse, Response},
     routing::get,
     Router,
@@ -21,6 +22,7 @@ use tokio_util::io::ReaderStream;
 use crate::auth::verify_token_and_get_claims;
 use crate::config::Config;
 use crate::error::{handle_404, AppError, AppResult};
+use crate::logging_middleware::logging_middleware;
 use crate::tls::{self, ChallengeStore};
 use crate::ReloadSignal;
 
@@ -332,7 +334,8 @@ pub async fn run_server(
             get(acme_challenge_handler),
         )
         .fallback(handle_404)
-        .with_state(state);
+        .with_state(state)
+        .layer(middleware::from_fn(logging_middleware));
 
     // Check if TLS is configured
     let has_tls = config.has_tls_cert() && config.cert.as_ref().and_then(|c| c.port).is_some();
@@ -342,7 +345,13 @@ pub async fn run_server(
         match tls::load_cert_from_config(&config)? {
             Some(tls_cert) => {
                 let server_config = tls_cert.into_server_config()?;
-                let tls_port = config.cert.as_ref().and_then(|c| c.port).unwrap();
+                let tls_port = match config.cert.as_ref().and_then(|c| c.port) {
+                    Some(port) => port,
+                    None => {
+                        error!("TLS port is not configured");
+                        return Err(anyhow!("TLS port is required when TLS is enabled"));
+                    }
+                };
 
                 info!("🔒 Starting HTTPS server on https://0.0.0.0:{}", tls_port);
                 info!("🔓 Starting HTTP server on http://0.0.0.0:{}", config.port);
@@ -385,21 +394,31 @@ pub async fn run_server(
                     let rustls_config = axum_server::tls_rustls::RustlsConfig::from_config(
                         std::sync::Arc::new(server_config),
                     );
-                    axum_server::bind_rustls(https_bind_address.parse().unwrap(), rustls_config)
+                    let addr = match https_bind_address.parse() {
+                        Ok(addr) => addr,
+                        Err(e) => {
+                            error!(
+                                "Failed to parse HTTPS bind address '{}': {}",
+                                https_bind_address, e
+                            );
+                            return Err(anyhow!("Failed to parse HTTPS bind address: {}", e));
+                        }
+                    };
+                    axum_server::bind_rustls(addr, rustls_config)
                         .serve(https_app.into_make_service())
                         .await
                         .map_err(|e| anyhow!("HTTPS server error: {}", e))
                 };
 
                 tokio::try_join!(http_server, https_server)?;
-                return Ok(());
+                Ok(())
             }
             None => {
                 warn!(
                     "TLS configured but certificate could not be loaded, falling back to HTTP only"
                 );
                 // Fall through to HTTP-only mode
-                return run_http_only_server(config, app, reload_rx).await;
+                run_http_only_server(config, app, reload_rx).await
             }
         }
     } else {
@@ -415,7 +434,7 @@ pub async fn run_server(
             }
         }
 
-        return run_http_only_server(config, app, reload_rx).await;
+        run_http_only_server(config, app, reload_rx).await
     }
 }
 

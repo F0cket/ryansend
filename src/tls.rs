@@ -5,7 +5,7 @@ use instant_acme::{
     OrderStatus,
 };
 use log::{debug, error, info, warn};
-use rcgen;
+
 use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     ServerConfig,

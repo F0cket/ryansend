@@ -25,6 +25,7 @@ use crate::auth::{
 };
 use crate::config::Config;
 use crate::error::{handle_404, make_admin_error_response};
+use crate::logging_middleware::logging_middleware;
 use crate::rate_limit::{
     admin_login_rate_limit_middleware, create_rate_limiter, AdminRateLimitConfig, AdminRateLimiter,
 };
@@ -926,7 +927,16 @@ async fn admin_setup_handler(
         }
 
         // Store the email for later use in certificate request
-        let acme_email_for_cert = acme_email.unwrap();
+        let acme_email_for_cert = match acme_email {
+            Some(email) => email,
+            None => {
+                error!("ACME email is required but was not provided");
+                return make_error_response(
+                    &config,
+                    "ACME email is required for Let's Encrypt".to_string(),
+                );
+            }
+        };
 
         // After saving config, trigger Let's Encrypt certificate request
         info!("🔐 Let's Encrypt configured, will request certificate after saving config");
@@ -1273,7 +1283,8 @@ pub async fn run_admin_server(
         .route("/admin/logout", get(admin_logout_handler))
         .merge(protected_routes)
         .fallback(handle_404)
-        .with_state(state);
+        .with_state(state)
+        .layer(middleware::from_fn(logging_middleware));
 
     // Check if TLS is configured for admin panel
     let has_admin_tls = config.has_tls_cert() && admin_config.tls_port.is_some();
@@ -1283,14 +1294,31 @@ pub async fn run_admin_server(
         match crate::tls::load_cert_from_config(&config)? {
             Some(tls_cert) => {
                 let server_config = tls_cert.into_server_config()?;
-                let tls_port = admin_config.tls_port.unwrap();
+                let tls_port = match admin_config.tls_port {
+                    Some(port) => port,
+                    None => {
+                        error!("Admin TLS port is not configured");
+                        return Ok(());
+                    }
+                };
 
                 info!("🔒 Starting admin server on https://0.0.0.0:{}", tls_port);
 
                 let bind_address = format!("0.0.0.0:{}", tls_port);
 
+                let addr = match bind_address.parse() {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        error!(
+                            "Failed to parse admin HTTPS bind address '{}': {}",
+                            bind_address, e
+                        );
+                        return Ok(());
+                    }
+                };
+
                 let https_server = axum_server::bind_rustls(
-                    bind_address.parse().unwrap(),
+                    addr,
                     axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(
                         server_config,
                     )),

@@ -6,6 +6,7 @@ mod admin;
 mod auth;
 mod config;
 mod error;
+mod logging_middleware;
 mod rate_limit;
 mod server;
 mod tls;
