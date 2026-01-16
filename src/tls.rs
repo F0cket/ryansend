@@ -17,7 +17,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
 
-use crate::config::{save_config, Config};
+use crate::config::Config;
 
 /// Storage for ACME challenge tokens
 pub type ChallengeStore = Arc<Mutex<HashMap<String, String>>>;
@@ -77,28 +77,57 @@ pub fn parse_cert_and_key(cert_pem: &str, key_pem: &str) -> Result<TlsCertificat
 }
 
 /// Load certificate from config
-pub fn load_cert_from_config(config: &Config) -> Result<Option<TlsCertificate>> {
-    if let Some(cert_config) = &config.cert {
-        if let (Some(cert_b64), Some(key_b64)) = (&cert_config.cert, &cert_config.key) {
-            // Decode base64
-            let cert_pem = String::from_utf8(
-                general_purpose::STANDARD
-                    .decode(cert_b64)
-                    .map_err(|e| anyhow!("Failed to decode certificate: {}", e))?,
-            )?;
+pub async fn load_cert_from_config(config: &Config) -> Result<Option<TlsCertificate>> {
+    if config.use_letsencrypt_cert {
+        // Load from Let's Encrypt config
+        if let Some(le_config) = &config.lets_encrypt {
+            if let (Some(cert_b64), Some(key_b64)) = (&le_config.cert, &le_config.key) {
+                // Decode base64
+                let cert_pem =
+                    String::from_utf8(general_purpose::STANDARD.decode(cert_b64).map_err(
+                        |e| anyhow!("Failed to decode Let's Encrypt certificate: {}", e),
+                    )?)?;
 
-            let key_pem = String::from_utf8(
-                general_purpose::STANDARD
-                    .decode(key_b64)
-                    .map_err(|e| anyhow!("Failed to decode private key: {}", e))?,
-            )?;
+                let key_pem =
+                    String::from_utf8(general_purpose::STANDARD.decode(key_b64).map_err(|e| {
+                        anyhow!("Failed to decode Let's Encrypt private key: {}", e)
+                    })?)?;
 
-            let tls_cert = parse_cert_and_key(&cert_pem, &key_pem)?;
-            debug!("Loaded TLS certificate from config");
-            return Ok(Some(tls_cert));
+                let tls_cert = parse_cert_and_key(&cert_pem, &key_pem)?;
+                debug!("Loaded TLS certificate from Let's Encrypt config");
+                return Ok(Some(tls_cert));
+            }
         }
+        debug!("use_letsencrypt_cert is true but no Let's Encrypt certificate found in config");
+        Ok(None)
+    } else {
+        // Load from file paths
+        let cert_path = config.cert_path.as_deref().unwrap_or("cert.pem");
+        let key_path = config.cert_key_path.as_deref().unwrap_or("key.pem");
+
+        // Check if files exist
+        if !tokio::fs::try_exists(cert_path).await.unwrap_or(false) {
+            debug!("Certificate file not found at: {}", cert_path);
+            return Ok(None);
+        }
+        if !tokio::fs::try_exists(key_path).await.unwrap_or(false) {
+            debug!("Key file not found at: {}", key_path);
+            return Ok(None);
+        }
+
+        // Read certificate and key from files
+        let cert_pem = tokio::fs::read_to_string(cert_path)
+            .await
+            .map_err(|e| anyhow!("Failed to read certificate file {}: {}", cert_path, e))?;
+
+        let key_pem = tokio::fs::read_to_string(key_path)
+            .await
+            .map_err(|e| anyhow!("Failed to read key file {}: {}", key_path, e))?;
+
+        let tls_cert = parse_cert_and_key(&cert_pem, &key_pem)?;
+        info!("Loaded TLS certificate from file: {}", cert_path);
+        Ok(Some(tls_cert))
     }
-    Ok(None)
 }
 
 /// Save certificate to config (base64 encoded)
@@ -112,25 +141,22 @@ pub async fn save_cert_to_config(
     let cert_b64 = general_purpose::STANDARD.encode(cert_pem.as_bytes());
     let key_b64 = general_purpose::STANDARD.encode(key_pem.as_bytes());
 
-    // Update config
-    if let Some(cert_config) = &mut config.cert {
-        cert_config.cert = Some(cert_b64);
-        cert_config.key = Some(key_b64);
-        cert_config.expiry = Some(expiry.to_rfc3339());
+    // Update or create Let's Encrypt config
+    if let Some(le_config) = &mut config.lets_encrypt {
+        le_config.cert = Some(cert_b64);
+        le_config.key = Some(key_b64);
+        le_config.expiry = Some(expiry.to_rfc3339());
     } else {
-        config.cert = Some(crate::config::CertConfig {
-            port: None,
+        config.lets_encrypt = Some(crate::config::LetsEncryptConfig {
             cert: Some(cert_b64),
             key: Some(key_b64),
             expiry: Some(expiry.to_rfc3339()),
-            acme_email: None,
-            is_letsencrypt: false,
+            acme_email: config
+                .lets_encrypt
+                .as_ref()
+                .and_then(|le| le.acme_email.clone()),
         });
     }
-
-    // Save to file
-    save_config(config).await?;
-    info!("Certificate saved to config, expires: {}", expiry);
 
     Ok(())
 }
@@ -398,9 +424,9 @@ pub async fn certificate_renewal_task(mut config: Config, challenge_store: Chall
 
                 // Get contact email from config or use a default
                 let contact_email = config
-                    .cert
+                    .lets_encrypt
                     .as_ref()
-                    .and_then(|c| c.acme_email.as_deref())
+                    .and_then(|le| le.acme_email.as_deref())
                     .unwrap_or("admin@example.com");
                 let acme_account_file = "data/acme_account.json";
 
@@ -490,36 +516,31 @@ mod tests {
     #[tokio::test]
     async fn test_save_and_load_cert_config() {
         let mut config = Config {
-            base_url: "https://test.example.com".to_string(),
+            base_url: "https://example.com".to_string(),
             port: 3000,
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: Some(crate::config::CertConfig {
-                port: Some(3443),
-                cert: None,
-                key: None,
-                expiry: None,
-                acme_email: None,
-                is_letsencrypt: false,
-            }),
+            tls_port: Some(3443),
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: true,
+            lets_encrypt: None,
         };
 
         // Generate test certificate
         let (cert_pem, key_pem) = generate_self_signed_cert("test.example.com").unwrap();
 
-        // Mock the save_config function for testing
-        config.cert = Some(crate::config::CertConfig {
-            port: Some(3443),
+        // Set up Let's Encrypt config with test certificate
+        config.lets_encrypt = Some(crate::config::LetsEncryptConfig {
             cert: Some(base64::engine::general_purpose::STANDARD.encode(cert_pem.as_bytes())),
             key: Some(base64::engine::general_purpose::STANDARD.encode(key_pem.as_bytes())),
             expiry: Some(chrono::Utc::now().to_rfc3339()),
             acme_email: None,
-            is_letsencrypt: false,
         });
 
-        // Test loading
-        let loaded_cert = load_cert_from_config(&config);
+        // Test loading (now async)
+        let loaded_cert = load_cert_from_config(&config).await;
         assert!(loaded_cert.is_ok());
         assert!(loaded_cert.unwrap().is_some());
     }
@@ -561,19 +582,21 @@ mod tests {
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: Some(crate::config::CertConfig {
-                port: Some(3443),
+            tls_port: Some(3443),
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: true,
+            lets_encrypt: Some(crate::config::LetsEncryptConfig {
                 cert: Some(base64::engine::general_purpose::STANDARD.encode(cert_pem.as_bytes())),
                 key: Some(base64::engine::general_purpose::STANDARD.encode(key_pem.as_bytes())),
                 expiry: Some(expired_time.to_rfc3339()),
                 acme_email: None,
-                is_letsencrypt: false,
             }),
         };
 
         let mut config_near_expiry = config_expired.clone();
-        if let Some(ref mut cert_config) = config_near_expiry.cert {
-            cert_config.expiry = Some(near_expiry_time.to_rfc3339());
+        if let Some(ref mut le_config) = config_near_expiry.lets_encrypt {
+            le_config.expiry = Some(near_expiry_time.to_rfc3339());
         }
 
         // Test that expired certificate is detected as needing renewal

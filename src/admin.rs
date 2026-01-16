@@ -69,9 +69,11 @@ struct SetupTemplate {
     admin_port: u16,
     admin_sharing_root: String,
     tls_port: String,
+    cert_path: String,
+    cert_key_path: String,
+    use_letsencrypt_cert: bool,
     tls_acme_email: String,
     tls_cert_expiry: String,
-    is_letsencrypt: bool,
     admin_tls_port: String,
     port_env_override: bool,
     admin_port_env_override: bool,
@@ -105,6 +107,9 @@ struct SetupForm {
     admin_port: u16,
     admin_sharing_root: String,
     tls_port: Option<String>,
+    cert_path: Option<String>,
+    cert_key_path: Option<String>,
+    use_letsencrypt_cert: Option<String>,
     request_letsencrypt: Option<String>,
     tls_acme_email: Option<String>,
     admin_tls_port: Option<String>,
@@ -697,13 +702,6 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
     let tls_port_env_override = std::env::var("RYANSEND_TLS_PORT").is_ok();
     let admin_tls_port_env_override = std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok();
 
-    let is_letsencrypt = state
-        .config
-        .cert
-        .as_ref()
-        .map(|c| c.is_letsencrypt)
-        .unwrap_or(false);
-
     let template = SetupTemplate {
         base_url: state.config.base_url.clone(),
         port: state.config.port,
@@ -715,24 +713,32 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
             .unwrap_or_default(),
         tls_port: state
             .config
-            .cert
-            .as_ref()
-            .and_then(|c| c.port)
+            .tls_port
             .map(|p| p.to_string())
             .unwrap_or_default(),
+        cert_path: state
+            .config
+            .cert_path
+            .clone()
+            .unwrap_or_else(|| "cert.pem".to_string()),
+        cert_key_path: state
+            .config
+            .cert_key_path
+            .clone()
+            .unwrap_or_else(|| "key.pem".to_string()),
+        use_letsencrypt_cert: state.config.use_letsencrypt_cert,
         tls_acme_email: state
             .config
-            .cert
+            .lets_encrypt
             .as_ref()
-            .and_then(|c| c.acme_email.clone())
+            .and_then(|le| le.acme_email.clone())
             .unwrap_or_default(),
         tls_cert_expiry: state
             .config
-            .cert
+            .lets_encrypt
             .as_ref()
-            .and_then(|c| c.expiry.clone())
+            .and_then(|le| le.expiry.clone())
             .unwrap_or_default(),
-        is_letsencrypt,
         admin_tls_port: admin_config
             .and_then(|a| a.tls_port)
             .map(|p| p.to_string())
@@ -760,11 +766,6 @@ async fn admin_setup_handler(
     // Helper function to create error response
     let make_error_response = |config: &crate::config::Config, error_msg: String| {
         let admin_config = config.admin.as_ref();
-        let is_letsencrypt = config
-            .cert
-            .as_ref()
-            .map(|c| c.is_letsencrypt)
-            .unwrap_or(false);
 
         let template = SetupTemplate {
             base_url: config.base_url.clone(),
@@ -775,23 +776,26 @@ async fn admin_setup_handler(
             admin_sharing_root: admin_config
                 .map(|a| a.sharing_root.clone())
                 .unwrap_or_default(),
-            tls_port: config
-                .cert
-                .as_ref()
-                .and_then(|c| c.port)
-                .map(|p| p.to_string())
-                .unwrap_or_default(),
+            tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
+            cert_path: config
+                .cert_path
+                .clone()
+                .unwrap_or_else(|| "cert.pem".to_string()),
+            cert_key_path: config
+                .cert_key_path
+                .clone()
+                .unwrap_or_else(|| "key.pem".to_string()),
+            use_letsencrypt_cert: config.use_letsencrypt_cert,
             tls_acme_email: config
-                .cert
+                .lets_encrypt
                 .as_ref()
-                .and_then(|c| c.acme_email.clone())
+                .and_then(|le| le.acme_email.clone())
                 .unwrap_or_default(),
             tls_cert_expiry: config
-                .cert
+                .lets_encrypt
                 .as_ref()
-                .and_then(|c| c.expiry.clone())
+                .and_then(|le| le.expiry.clone())
                 .unwrap_or_default(),
-            is_letsencrypt,
             admin_tls_port: admin_config
                 .and_then(|a| a.tls_port)
                 .map(|p| p.to_string())
@@ -825,18 +829,11 @@ async fn admin_setup_handler(
                 secret_key: String::new(),
                 admin: None,
                 remove_kofi: form.remove_kofi.is_some(),
-                cert: form
-                    .tls_port
-                    .as_ref()
-                    .and_then(|s| s.parse().ok())
-                    .map(|port| crate::config::CertConfig {
-                        port: Some(port),
-                        cert: None,
-                        key: None,
-                        expiry: None,
-                        acme_email: form.tls_acme_email.clone(),
-                        is_letsencrypt: false,
-                    }),
+                tls_port: form.tls_port.as_ref().and_then(|s| s.parse().ok()),
+                cert_path: form.cert_path.clone(),
+                cert_key_path: form.cert_key_path.clone(),
+                use_letsencrypt_cert: form.use_letsencrypt_cert.is_some(),
+                lets_encrypt: None,
             };
             return make_error_response(&minimal_config, format!("Failed to load config: {}", e));
         }
@@ -855,22 +852,14 @@ async fn admin_setup_handler(
         admin.tls_port = form.admin_tls_port.and_then(|s| s.parse().ok());
     }
 
-    // Update TLS port
-    let tls_port = form.tls_port.and_then(|s| s.parse().ok());
-    if let Some(port) = tls_port {
-        if let Some(ref mut cert_config) = config.cert {
-            cert_config.port = Some(port);
-        } else {
-            config.cert = Some(crate::config::CertConfig {
-                port: Some(port),
-                cert: None,
-                key: None,
-                expiry: None,
-                acme_email: None,
-                is_letsencrypt: false,
-            });
-        }
-    }
+    // Update TLS configuration
+    config.tls_port = form.tls_port.and_then(|s| s.parse().ok());
+    config.cert_path = form.cert_path;
+    config.cert_key_path = form.cert_key_path;
+
+    // Update use_letsencrypt_cert toggle
+    let toggled_to_letsencrypt = form.use_letsencrypt_cert.is_some();
+    config.use_letsencrypt_cert = toggled_to_letsencrypt;
 
     // Handle certificate configuration
     let request_letsencrypt = form.request_letsencrypt.is_some();
@@ -912,17 +901,15 @@ async fn admin_setup_handler(
             return make_error_response(&config, "Invalid base URL format".to_string());
         }
 
-        if let Some(ref mut cert_config) = config.cert {
-            cert_config.acme_email = acme_email.clone();
-            cert_config.is_letsencrypt = false; // Will be set to true after successful cert request
+        // Update or create Let's Encrypt config with email
+        if let Some(ref mut le_config) = config.lets_encrypt {
+            le_config.acme_email = acme_email.clone();
         } else {
-            config.cert = Some(crate::config::CertConfig {
-                port: None,
+            config.lets_encrypt = Some(crate::config::LetsEncryptConfig {
                 cert: None,
                 key: None,
                 expiry: None,
                 acme_email: acme_email.clone(),
-                is_letsencrypt: false, // Will be set to true after successful cert request
             });
         }
 
@@ -986,23 +973,26 @@ async fn admin_setup_handler(
                 info!("📅 Certificate expires: {}", expiry);
 
                 // Set TLS port to 443 if not already configured
-                if config.cert.as_ref().and_then(|c| c.port).is_none() {
+                if config.tls_port.is_none() {
                     info!("📌 Setting TLS port to 443 (default HTTPS port)");
-                    if let Some(ref mut cert_config) = config.cert {
-                        cert_config.port = Some(443);
-                    }
+                    config.tls_port = Some(443);
                 }
 
-                // Mark certificate as Let's Encrypt
-                if let Some(ref mut cert_config) = config.cert {
-                    cert_config.is_letsencrypt = true;
-                }
+                // Enable use_letsencrypt_cert now that we have a cert
+                config.use_letsencrypt_cert = true;
 
                 // Save certificate to config
                 match crate::tls::save_cert_to_config(&mut config, &cert_pem, &key_pem, expiry)
                     .await
                 {
                     Ok(()) => {
+                        // Now save the entire config
+                        if let Err(e) = crate::config::save_config(&config).await {
+                            return make_error_response(
+                                &config,
+                                format!("Failed to save config after certificate: {}", e),
+                            );
+                        }
                         info!("💾 Certificate saved to config");
                         info!("🔄 Triggering server restart to activate TLS certificate...");
 
@@ -1103,11 +1093,6 @@ async fn admin_setup_handler(
     match crate::config::save_config(&config).await {
         Ok(_) => {
             let admin_config = config.admin.as_ref();
-            let is_letsencrypt = config
-                .cert
-                .as_ref()
-                .map(|c| c.is_letsencrypt)
-                .unwrap_or(false);
 
             let template = SetupTemplate {
                 base_url: config.base_url.clone(),
@@ -1118,23 +1103,26 @@ async fn admin_setup_handler(
                 admin_sharing_root: admin_config
                     .map(|a| a.sharing_root.clone())
                     .unwrap_or_default(),
-                tls_port: config
-                    .cert
-                    .as_ref()
-                    .and_then(|c| c.port)
-                    .map(|p| p.to_string())
-                    .unwrap_or_default(),
+                tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
+                cert_path: config
+                    .cert_path
+                    .clone()
+                    .unwrap_or_else(|| "cert.pem".to_string()),
+                cert_key_path: config
+                    .cert_key_path
+                    .clone()
+                    .unwrap_or_else(|| "key.pem".to_string()),
+                use_letsencrypt_cert: config.use_letsencrypt_cert,
                 tls_acme_email: config
-                    .cert
+                    .lets_encrypt
                     .as_ref()
-                    .and_then(|c| c.acme_email.clone())
+                    .and_then(|le| le.acme_email.clone())
                     .unwrap_or_default(),
                 tls_cert_expiry: config
-                    .cert
+                    .lets_encrypt
                     .as_ref()
-                    .and_then(|c| c.expiry.clone())
+                    .and_then(|le| le.expiry.clone())
                     .unwrap_or_default(),
-                is_letsencrypt,
                 admin_tls_port: admin_config
                     .and_then(|a| a.tls_port)
                     .map(|p| p.to_string())
@@ -1291,7 +1279,7 @@ pub async fn run_admin_server(
 
     if has_admin_tls {
         // Load TLS certificate
-        match crate::tls::load_cert_from_config(&config)? {
+        match crate::tls::load_cert_from_config(&config).await? {
             Some(tls_cert) => {
                 let server_config = tls_cert.into_server_config()?;
                 let tls_port = match admin_config.tls_port {

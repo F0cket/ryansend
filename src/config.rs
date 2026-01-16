@@ -17,18 +17,23 @@ pub struct Config {
     #[serde(default)]
     pub remove_kofi: bool,
     #[serde(default)]
-    pub cert: Option<CertConfig>,
+    pub tls_port: Option<u16>,
+    #[serde(default)]
+    pub cert_path: Option<String>,
+    #[serde(default)]
+    pub cert_key_path: Option<String>,
+    #[serde(default)]
+    pub use_letsencrypt_cert: bool,
+    #[serde(default)]
+    pub lets_encrypt: Option<LetsEncryptConfig>,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct CertConfig {
-    pub port: Option<u16>,
+pub struct LetsEncryptConfig {
     pub cert: Option<String>,
     pub key: Option<String>,
     pub expiry: Option<String>,
     pub acme_email: Option<String>,
-    #[serde(default)]
-    pub is_letsencrypt: bool, // true if current cert is from Let's Encrypt
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -44,16 +49,27 @@ pub struct AdminConfig {
 impl Config {
     /// Check if TLS certificate is configured
     pub fn has_tls_cert(&self) -> bool {
-        self.cert
-            .as_ref()
-            .map(|c| c.cert.is_some() && c.key.is_some())
-            .unwrap_or(false)
+        if self.use_letsencrypt_cert {
+            // Check if Let's Encrypt cert is available
+            self.lets_encrypt
+                .as_ref()
+                .map(|le| le.cert.is_some() && le.key.is_some())
+                .unwrap_or(false)
+        } else {
+            // Check if file paths are configured
+            self.cert_path.is_some() && self.cert_key_path.is_some()
+        }
     }
 
     /// Check if certificate renewal is needed (within 30 days of expiry)
+    /// Only applies to Let's Encrypt certificates
     pub fn is_cert_renewal_needed(&self) -> bool {
-        if let Some(cert_config) = &self.cert {
-            if let Some(expiry_str) = &cert_config.expiry {
+        if !self.use_letsencrypt_cert {
+            return false; // File-based certs don't auto-renew
+        }
+
+        if let Some(le_config) = &self.lets_encrypt {
+            if let Some(expiry_str) = &le_config.expiry {
                 if let Ok(expiry) = chrono::DateTime::parse_from_rfc3339(expiry_str) {
                     let now = chrono::Utc::now();
                     let days_until_expiry = (expiry.with_timezone(&chrono::Utc) - now).num_days();
@@ -137,19 +153,22 @@ pub async fn load_config() -> Result<Config> {
 
     // Override TLS port with environment variable if present
     if let Ok(env_tls_port) = std::env::var("RYANSEND_TLS_PORT") {
-        let port = env_tls_port.parse().ok();
-        if let Some(cert_config) = &mut config.cert {
-            cert_config.port = port;
-        } else if port.is_some() {
-            config.cert = Some(CertConfig {
-                port,
-                cert: None,
-                key: None,
-                expiry: None,
-                acme_email: None,
-                is_letsencrypt: false,
-            });
-        }
+        config.tls_port = env_tls_port.parse().ok();
+    }
+
+    // Override cert path with environment variable if present
+    if let Ok(env_cert_path) = std::env::var("RYANSEND_CERT_PATH") {
+        config.cert_path = Some(env_cert_path);
+    }
+
+    // Override cert key path with environment variable if present
+    if let Ok(env_cert_key_path) = std::env::var("RYANSEND_CERT_KEY_PATH") {
+        config.cert_key_path = Some(env_cert_key_path);
+    }
+
+    // Override use_letsencrypt_cert with environment variable if present
+    if let Ok(env_use_le) = std::env::var("RYANSEND_USE_LETSENCRYPT_CERT") {
+        config.use_letsencrypt_cert = env_use_le.parse().unwrap_or(config.use_letsencrypt_cert);
     }
 
     // Override admin TLS port with environment variable if present
@@ -236,14 +255,11 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         secret_key: paserk_string.clone(),
         admin: Some(admin_config),
         remove_kofi: false,
-        cert: tls_port.map(|port| CertConfig {
-            port: Some(port),
-            cert: None,
-            key: None,
-            expiry: None,
-            acme_email: None,
-            is_letsencrypt: false,
-        }),
+        tls_port,
+        cert_path: Some("cert.pem".to_string()),
+        cert_key_path: Some("key.pem".to_string()),
+        use_letsencrypt_cert: false,
+        lets_encrypt: None,
     };
 
     let config_path = get_config_file_path();
@@ -421,19 +437,7 @@ remove_kofi: false
 
         // Simulate the environment variable override logic from load_config
         if let Ok(env_tls_port) = env::var("RYANSEND_TLS_PORT") {
-            if config.cert.is_none() {
-                config.cert = Some(CertConfig {
-                    port: None,
-                    cert: None,
-                    key: None,
-                    expiry: None,
-                    acme_email: None,
-                    is_letsencrypt: false,
-                });
-            }
-            if let Some(ref mut cert) = config.cert {
-                cert.port = Some(env_tls_port.parse().unwrap_or(cert.port.unwrap_or(3443)));
-            }
+            config.tls_port = env_tls_port.parse().ok();
         }
 
         if let Ok(env_admin_tls_port) = env::var("RYANSEND_ADMIN_TLS_PORT") {
@@ -447,14 +451,7 @@ remove_kofi: false
         }
 
         // Verify the ports were set correctly
-        assert_eq!(
-            config
-                .cert
-                .as_ref()
-                .expect("Cert config should be present")
-                .port,
-            Some(8443)
-        );
+        assert_eq!(config.tls_port, Some(8443));
         assert_eq!(
             config
                 .admin
@@ -477,7 +474,11 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: None,
+            tls_port: None,
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
         };
 
         assert_eq!(config.get_domain().unwrap(), "example.com");
@@ -488,7 +489,11 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: None,
+            tls_port: None,
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
         };
 
         assert_eq!(config_with_port.get_domain().unwrap(), "example.com");
@@ -499,7 +504,11 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: None,
+            tls_port: None,
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
         };
 
         assert!(config_localhost.get_domain().is_err());
@@ -513,28 +522,49 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: None,
+            tls_port: None,
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
         };
 
         assert!(!config_no_cert.has_tls_cert());
 
-        let config_with_cert = Config {
+        let config_with_file_cert = Config {
             base_url: "https://example.com".to_string(),
             port: 3000,
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: Some(CertConfig {
-                port: None,
+            tls_port: Some(443),
+            cert_path: Some("cert.pem".to_string()),
+            cert_key_path: Some("key.pem".to_string()),
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
+        };
+
+        assert!(config_with_file_cert.has_tls_cert());
+
+        let config_with_le_cert = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            tls_port: Some(443),
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: true,
+            lets_encrypt: Some(LetsEncryptConfig {
                 cert: Some("cert-data".to_string()),
                 key: Some("key-data".to_string()),
                 expiry: None,
                 acme_email: None,
-                is_letsencrypt: false,
             }),
         };
 
-        assert!(config_with_cert.has_tls_cert());
+        assert!(config_with_le_cert.has_tls_cert());
     }
 
     #[test]
@@ -549,13 +579,15 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: Some(CertConfig {
-                port: None,
+            tls_port: Some(443),
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: true,
+            lets_encrypt: Some(LetsEncryptConfig {
                 cert: Some("cert-data".to_string()),
                 key: Some("key-data".to_string()),
                 expiry: Some(future_expiry.to_rfc3339()),
                 acme_email: None,
-                is_letsencrypt: false,
             }),
         };
 
@@ -567,13 +599,15 @@ remove_kofi: false
             secret_key: "test-key".to_string(),
             admin: None,
             remove_kofi: false,
-            cert: Some(CertConfig {
-                port: None,
+            tls_port: Some(443),
+            cert_path: None,
+            cert_key_path: None,
+            use_letsencrypt_cert: true,
+            lets_encrypt: Some(LetsEncryptConfig {
                 cert: Some("cert-data".to_string()),
                 key: Some("key-data".to_string()),
                 expiry: Some(near_expiry.to_rfc3339()),
                 acme_email: None,
-                is_letsencrypt: false,
             }),
         };
 

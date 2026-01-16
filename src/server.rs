@@ -338,14 +338,14 @@ pub async fn run_server(
         .layer(middleware::from_fn(logging_middleware));
 
     // Check if TLS is configured
-    let has_tls = config.has_tls_cert() && config.cert.as_ref().and_then(|c| c.port).is_some();
+    let has_tls = config.has_tls_cert() && config.tls_port.is_some();
 
     if has_tls {
         // Load TLS certificate
-        match tls::load_cert_from_config(&config)? {
+        match tls::load_cert_from_config(&config).await? {
             Some(tls_cert) => {
                 let server_config = tls_cert.into_server_config()?;
-                let tls_port = match config.cert.as_ref().and_then(|c| c.port) {
+                let tls_port = match config.tls_port {
                     Some(port) => port,
                     None => {
                         error!("TLS port is not configured");
