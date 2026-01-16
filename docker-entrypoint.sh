@@ -17,18 +17,41 @@ log "Starting ryansend with PUID=$PUID, PGID=$PGID"
 
 # Create group if it doesn't exist
 if ! getent group appgroup >/dev/null 2>&1; then
-    log "Creating group 'appgroup' with GID $PGID"
-    groupadd -g "$PGID" appgroup
+    # Check if GID is already taken
+    if getent group "$PGID" >/dev/null 2>&1; then
+        EXISTING_GROUP=$(getent group "$PGID" | cut -d: -f1)
+        log "GID $PGID already exists for group '$EXISTING_GROUP', using existing group"
+        PGID=$(getent group "$EXISTING_GROUP" | cut -d: -f3)
+    else
+        log "Creating group 'appgroup' with GID $PGID"
+        groupadd -g "$PGID" appgroup
+    fi
+else
+    log "Group 'appgroup' already exists"
 fi
 
 # Create user if it doesn't exist
 if ! getent passwd appuser >/dev/null 2>&1; then
-    log "Creating user 'appuser' with UID $PUID"
-    useradd -u "$PUID" -g "$PGID" -d /data -s /bin/bash appuser
+    # Check if UID is already taken
+    if getent passwd "$PUID" >/dev/null 2>&1; then
+        EXISTING_USER=$(getent passwd "$PUID" | cut -d: -f1)
+        log "UID $PUID already exists for user '$EXISTING_USER', creating appuser with next available UID"
+        useradd -g "$PGID" -d /data -s /bin/bash appuser 2>/dev/null || true
+        PUID=$(id -u appuser)
+        log "Created user 'appuser' with UID $PUID"
+    else
+        log "Creating user 'appuser' with UID $PUID"
+        useradd -u "$PUID" -g "$PGID" -d /data -s /bin/bash appuser 2>/dev/null || true
+    fi
 else
-    # Modify existing user to match PUID/PGID
-    log "Updating user 'appuser' to UID $PUID and GID $PGID"
-    usermod -u "$PUID" -g "$PGID" appuser >/dev/null 2>&1 || true
+    log "User 'appuser' already exists"
+    # Update to match PUID/PGID if different
+    CURRENT_UID=$(id -u appuser)
+    CURRENT_GID=$(id -g appuser)
+    if [ "$CURRENT_UID" != "$PUID" ] || [ "$CURRENT_GID" != "$PGID" ]; then
+        log "Updating user 'appuser' to UID $PUID and GID $PGID"
+        usermod -u "$PUID" -g "$PGID" appuser 2>/dev/null || true
+    fi
 fi
 
 # Ensure /data directory exists and has correct permissions

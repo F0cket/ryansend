@@ -1,5 +1,5 @@
 # Multi-stage Dockerfile for ryansend
-FROM rust:1.92 AS builder
+FROM rust:1.92-bookworm AS builder
 
 WORKDIR /usr/src/app
 
