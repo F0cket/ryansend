@@ -69,8 +69,6 @@ struct SetupTemplate {
     admin_port: u16,
     admin_sharing_root: String,
     tls_port: String,
-    cert_path: String,
-    cert_key_path: String,
     use_letsencrypt_cert: bool,
     tls_acme_email: String,
     tls_cert_expiry: String,
@@ -107,8 +105,6 @@ struct SetupForm {
     admin_port: u16,
     admin_sharing_root: String,
     tls_port: Option<String>,
-    cert_path: Option<String>,
-    cert_key_path: Option<String>,
     use_letsencrypt_cert: Option<String>,
     request_letsencrypt: Option<String>,
     tls_acme_email: Option<String>,
@@ -716,16 +712,6 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
             .tls_port
             .map(|p| p.to_string())
             .unwrap_or_default(),
-        cert_path: state
-            .config
-            .cert_path
-            .clone()
-            .unwrap_or_else(|| "cert.pem".to_string()),
-        cert_key_path: state
-            .config
-            .cert_key_path
-            .clone()
-            .unwrap_or_else(|| "key.pem".to_string()),
         use_letsencrypt_cert: state.config.use_letsencrypt_cert,
         tls_acme_email: state
             .config
@@ -777,14 +763,6 @@ async fn admin_setup_handler(
                 .map(|a| a.sharing_root.clone())
                 .unwrap_or_default(),
             tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
-            cert_path: config
-                .cert_path
-                .clone()
-                .unwrap_or_else(|| "cert.pem".to_string()),
-            cert_key_path: config
-                .cert_key_path
-                .clone()
-                .unwrap_or_else(|| "key.pem".to_string()),
             use_letsencrypt_cert: config.use_letsencrypt_cert,
             tls_acme_email: config
                 .lets_encrypt
@@ -830,8 +808,8 @@ async fn admin_setup_handler(
                 admin: None,
                 remove_kofi: form.remove_kofi.is_some(),
                 tls_port: form.tls_port.as_ref().and_then(|s| s.parse().ok()),
-                cert_path: form.cert_path.clone(),
-                cert_key_path: form.cert_key_path.clone(),
+                cert_path: None,
+                cert_key_path: None,
                 use_letsencrypt_cert: form.use_letsencrypt_cert.is_some(),
                 lets_encrypt: None,
             };
@@ -854,8 +832,6 @@ async fn admin_setup_handler(
 
     // Update TLS configuration
     config.tls_port = form.tls_port.and_then(|s| s.parse().ok());
-    config.cert_path = form.cert_path;
-    config.cert_key_path = form.cert_key_path;
 
     // Update use_letsencrypt_cert toggle
     let toggled_to_letsencrypt = form.use_letsencrypt_cert.is_some();
@@ -1104,14 +1080,6 @@ async fn admin_setup_handler(
                     .map(|a| a.sharing_root.clone())
                     .unwrap_or_default(),
                 tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
-                cert_path: config
-                    .cert_path
-                    .clone()
-                    .unwrap_or_else(|| "cert.pem".to_string()),
-                cert_key_path: config
-                    .cert_key_path
-                    .clone()
-                    .unwrap_or_else(|| "key.pem".to_string()),
                 use_letsencrypt_cert: config.use_letsencrypt_cert,
                 tls_acme_email: config
                     .lets_encrypt

@@ -166,6 +166,18 @@
                 display: block;
                 margin-bottom: 0.5rem;
             }
+            .info-box {
+                background: #d1ecf1;
+                border: 1px solid #bee5eb;
+                padding: 1rem;
+                border-radius: 4px;
+                margin-bottom: 1.5rem;
+                color: #0c5460;
+            }
+            .info-box > strong {
+                display: block;
+                margin-bottom: 0.5rem;
+            }
             .button-group {
                 display: flex;
                 gap: 1rem;
@@ -401,45 +413,11 @@
                                 border-radius: 4px;
                             "
                         >
-                            📜 Let's Encrypt certificate available, expires:
+                            📜 Let's Encrypt certificate installed, expires:
                             <strong>{{ tls_cert_expiry }}</strong>
                         </div>
                     </div>
-                    {% endif %}
 
-                    <div class="form-group">
-                        <label for="cert_path">Certificate File Path</label>
-                        <input
-                            type="text"
-                            id="cert_path"
-                            name="cert_path"
-                            value="{{ cert_path }}"
-                            placeholder="cert.pem"
-                        />
-                        <span class="help-text"
-                            >Path to PEM certificate file (if using file-based
-                            cert)</span
-                        >
-                    </div>
-
-                    <div class="form-group">
-                        <label for="cert_key_path"
-                            >Certificate Key File Path</label
-                        >
-                        <input
-                            type="text"
-                            id="cert_key_path"
-                            name="cert_key_path"
-                            value="{{ cert_key_path }}"
-                            placeholder="key.pem"
-                        />
-                        <span class="help-text"
-                            >Path to PEM private key file (if using file-based
-                            cert)</span
-                        >
-                    </div>
-
-                    {% if tls_cert_expiry != "" %}
                     <div class="form-group">
                         <label class="checkbox-label">
                             <input
@@ -456,7 +434,7 @@
                             Use Let's Encrypt certificate
                         </label>
                         <span class="help-text"
-                            >Toggle between file-based and Let's Encrypt
+                            >Enable to use automatically managed Let's Encrypt
                             certificate</span
                         >
                     </div>
@@ -492,7 +470,6 @@
                             use_letsencrypt_cert automatically)</span
                         >
                     </div>
-                    {% endif %}
 
                     <div class="form-group" id="acme_email_group">
                         <label for="tls_acme_email">ACME Email Address *</label>
@@ -509,33 +486,43 @@
                         >
                     </div>
 
-                    <div class="warning-box" id="letsencrypt_info">
-                        <strong>Let's Encrypt Requirements:</strong>
+                    <div class="info-box">
+                        <strong>📘 How Let's Encrypt Works:</strong>
                         <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0">
                             <li>
-                                Base URL must be a valid domain (not localhost
-                                or IP address)
+                                Let's Encrypt provides
+                                <strong
+                                    >free, automated SSL/TLS
+                                    certificates</strong
+                                >
                             </li>
                             <li>
                                 <strong
                                     >Port 80 must be accessible from the
                                     internet</strong
                                 >
-                                for HTTP-01 challenge validation. Either set
-                                HTTP Port to 80 above, or configure a reverse
-                                proxy (nginx/Apache/Caddy) to forward external
-                                port 80 to your HTTP port.
+                                for HTTP-01 challenge validation
                             </li>
                             <li>
-                                Certificates are renewed automatically 30 days
+                                Either set HTTP Port to 80 above, or configure a
+                                reverse proxy (nginx/Apache/Caddy) to forward
+                                external port 80 to your HTTP port
+                            </li>
+                            <li>
+                                Certificates are automatically renewed 30 days
                                 before expiry
                             </li>
                             <li>
+                                Your domain must resolve to this server's IP
+                                address
+                            </li>
+                            <li>
                                 Email address is required for important
-                                notifications
+                                certificate notifications
                             </li>
                         </ul>
                     </div>
+                    {% endif %}
 
                     <div class="form-group">
                         <label for="admin_tls_port"
@@ -563,6 +550,33 @@
                     </div>
                 </div>
 
+                <div class="info-box" style="margin-top: 1rem">
+                    <strong>💡 Manual Certificate Configuration:</strong>
+                    <p style="margin: 0.5rem 0 0 0">
+                        If you prefer not to use Let's Encrypt, you can manually
+                        place certificate files and configure them in
+                        <code>config.yaml</code>:
+                    </p>
+                    <ul style="margin: 0.5rem 0 0 1.5rem; padding: 0">
+                        <li>Set <code>cert_path: /path/to/cert.pem</code></li>
+                        <li>
+                            Set <code>cert_key_path: /path/to/key.pem</code>
+                        </li>
+                        <li>Set <code>use_letsencrypt_cert: false</code></li>
+                    </ul>
+                    <p
+                        style="
+                            margin: 0.5rem 0 0 0;
+                            font-size: 0.875rem;
+                            color: #666;
+                        "
+                    >
+                        You can also use environment variables:
+                        <code>RYANSEND_CERT_PATH</code> and
+                        <code>RYANSEND_CERT_KEY_PATH</code>
+                    </p>
+                </div>
+
                 <div class="button-group">
                     <button type="submit" class="btn btn-primary">
                         💾 Save Configuration
@@ -571,5 +585,61 @@
                 </div>
             </form>
         </div>
+        <script>
+            // Toggle ACME email field based on use_letsencrypt_cert or request_letsencrypt checkboxes
+            (function () {
+                var useLetsEncryptCheckbox = document.getElementById(
+                    "use_letsencrypt_cert",
+                );
+                var requestLetsEncryptCheckbox = document.getElementById(
+                    "request_letsencrypt",
+                );
+                var acmeEmailGroup =
+                    document.getElementById("acme_email_group");
+
+                function toggleFields() {
+                    var shouldShow = false;
+
+                    // Show if using existing Let's Encrypt cert
+                    if (
+                        useLetsEncryptCheckbox &&
+                        useLetsEncryptCheckbox.checked
+                    ) {
+                        shouldShow = true;
+                    }
+
+                    // Show if requesting a new Let's Encrypt cert
+                    if (
+                        requestLetsEncryptCheckbox &&
+                        requestLetsEncryptCheckbox.checked
+                    ) {
+                        shouldShow = true;
+                    }
+
+                    if (acmeEmailGroup) {
+                        acmeEmailGroup.style.display = shouldShow
+                            ? "block"
+                            : "none";
+                    }
+                }
+
+                // Set initial state
+                toggleFields();
+
+                // Listen for changes on both checkboxes
+                if (useLetsEncryptCheckbox) {
+                    useLetsEncryptCheckbox.addEventListener(
+                        "change",
+                        toggleFields,
+                    );
+                }
+                if (requestLetsEncryptCheckbox) {
+                    requestLetsEncryptCheckbox.addEventListener(
+                        "change",
+                        toggleFields,
+                    );
+                }
+            })();
+        </script>
     </body>
 </html>

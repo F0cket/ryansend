@@ -76,7 +76,7 @@ pub fn parse_cert_and_key(cert_pem: &str, key_pem: &str) -> Result<TlsCertificat
     })
 }
 
-/// Load certificate from config
+/// Load certificate from config (supports both Let's Encrypt and file-based certs)
 pub async fn load_cert_from_config(config: &Config) -> Result<Option<TlsCertificate>> {
     if config.use_letsencrypt_cert {
         // Load from Let's Encrypt config
@@ -99,35 +99,35 @@ pub async fn load_cert_from_config(config: &Config) -> Result<Option<TlsCertific
             }
         }
         debug!("use_letsencrypt_cert is true but no Let's Encrypt certificate found in config");
-        Ok(None)
-    } else {
-        // Load from file paths
-        let cert_path = config.cert_path.as_deref().unwrap_or("cert.pem");
-        let key_path = config.cert_key_path.as_deref().unwrap_or("key.pem");
-
-        // Check if files exist
-        if !tokio::fs::try_exists(cert_path).await.unwrap_or(false) {
-            debug!("Certificate file not found at: {}", cert_path);
-            return Ok(None);
-        }
-        if !tokio::fs::try_exists(key_path).await.unwrap_or(false) {
-            debug!("Key file not found at: {}", key_path);
-            return Ok(None);
-        }
-
-        // Read certificate and key from files
-        let cert_pem = tokio::fs::read_to_string(cert_path)
-            .await
-            .map_err(|e| anyhow!("Failed to read certificate file {}: {}", cert_path, e))?;
-
-        let key_pem = tokio::fs::read_to_string(key_path)
-            .await
-            .map_err(|e| anyhow!("Failed to read key file {}: {}", key_path, e))?;
-
-        let tls_cert = parse_cert_and_key(&cert_pem, &key_pem)?;
-        info!("Loaded TLS certificate from file: {}", cert_path);
-        Ok(Some(tls_cert))
+        return Ok(None);
     }
+
+    // Load from file paths
+    let cert_path = config.cert_path.as_deref().unwrap_or("cert.pem");
+    let key_path = config.cert_key_path.as_deref().unwrap_or("key.pem");
+
+    // Check if files exist
+    if !tokio::fs::try_exists(cert_path).await.unwrap_or(false) {
+        debug!("Certificate file not found at: {}", cert_path);
+        return Ok(None);
+    }
+    if !tokio::fs::try_exists(key_path).await.unwrap_or(false) {
+        debug!("Key file not found at: {}", key_path);
+        return Ok(None);
+    }
+
+    // Read certificate and key from files
+    let cert_pem = tokio::fs::read_to_string(cert_path)
+        .await
+        .map_err(|e| anyhow!("Failed to read certificate file {}: {}", cert_path, e))?;
+
+    let key_pem = tokio::fs::read_to_string(key_path)
+        .await
+        .map_err(|e| anyhow!("Failed to read key file {}: {}", key_path, e))?;
+
+    let tls_cert = parse_cert_and_key(&cert_pem, &key_pem)?;
+    info!("Loaded TLS certificate from file: {}", cert_path);
+    Ok(Some(tls_cert))
 }
 
 /// Save certificate to config (base64 encoded)

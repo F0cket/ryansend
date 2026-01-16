@@ -538,21 +538,6 @@ remove_kofi: false
             admin: None,
             remove_kofi: false,
             tls_port: Some(443),
-            cert_path: Some("cert.pem".to_string()),
-            cert_key_path: Some("key.pem".to_string()),
-            use_letsencrypt_cert: false,
-            lets_encrypt: None,
-        };
-
-        assert!(config_with_file_cert.has_tls_cert());
-
-        let config_with_le_cert = Config {
-            base_url: "https://example.com".to_string(),
-            port: 3000,
-            secret_key: "test-key".to_string(),
-            admin: None,
-            remove_kofi: false,
-            tls_port: Some(443),
             cert_path: None,
             cert_key_path: None,
             use_letsencrypt_cert: true,
@@ -564,7 +549,22 @@ remove_kofi: false
             }),
         };
 
-        assert!(config_with_le_cert.has_tls_cert());
+        assert!(config_with_file_cert.has_tls_cert());
+
+        let config_with_file_cert = Config {
+            base_url: "https://example.com".to_string(),
+            port: 3000,
+            secret_key: "test-key".to_string(),
+            admin: None,
+            remove_kofi: false,
+            tls_port: Some(443),
+            cert_path: Some("cert.pem".to_string()),
+            cert_key_path: Some("key.pem".to_string()),
+            use_letsencrypt_cert: false,
+            lets_encrypt: None,
+        };
+
+        assert!(config_with_file_cert.has_tls_cert());
     }
 
     #[test]
