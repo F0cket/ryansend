@@ -5,6 +5,6 @@ accepted = [
     "ISC",
     "Unicode-3.0",
     "OpenSSL",
-    "ZLib",
+    "Zlib",
     "CDLA-Permissive-2.0"
 ]
