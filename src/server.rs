@@ -330,7 +330,7 @@ pub async fn run_server(
     let app = Router::new()
         .route("/download", get(download_handler))
         .route(
-            "/.well-known/acme-challenge/:token",
+            "/.well-known/acme-challenge/{token}",
             get(acme_challenge_handler),
         )
         .fallback(handle_404)

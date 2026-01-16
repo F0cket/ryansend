@@ -10,9 +10,8 @@ use rustls::{
     pki_types::{CertificateDer, PrivateKeyDer},
     ServerConfig,
 };
-use rustls_pemfile::{certs, private_key};
+use rustls_pki_types::pem::PemObject;
 use std::collections::HashMap;
-use std::io::BufReader;
 use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::Mutex;
@@ -56,19 +55,18 @@ pub fn generate_self_signed_cert(domain: &str) -> Result<(String, String)> {
 
 /// Parse PEM certificate and key into rustls types
 pub fn parse_cert_and_key(cert_pem: &str, key_pem: &str) -> Result<TlsCertificate> {
-    // Parse certificate chain
-    let cert_reader = &mut BufReader::new(cert_pem.as_bytes());
-    let cert_chain: Result<Vec<_>, _> = certs(cert_reader).collect();
-    let cert_chain = cert_chain.map_err(|e| anyhow!("Failed to parse certificate: {}", e))?;
+    // Parse certificate chain using new rustls-pki-types API
+    let cert_chain = CertificateDer::pem_slice_iter(cert_pem.as_bytes())
+        .collect::<Result<Vec<_>, _>>()
+        .map_err(|e| anyhow!("Failed to parse certificate: {}", e))?;
 
     if cert_chain.is_empty() {
         return Err(anyhow!("No certificates found in PEM data"));
     }
 
-    // Parse private key
-    let key_reader = &mut BufReader::new(key_pem.as_bytes());
-    let private_key =
-        private_key(key_reader)?.ok_or_else(|| anyhow!("No private key found in PEM data"))?;
+    // Parse private key using new rustls-pki-types API
+    let private_key = PrivateKeyDer::from_pem_slice(key_pem.as_bytes())
+        .map_err(|e| anyhow!("Failed to parse private key: {}", e))?;
 
     Ok(TlsCertificate {
         cert_chain,

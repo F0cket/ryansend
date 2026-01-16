@@ -5,33 +5,33 @@ edition = "2021"
 license = "MIT OR Apache-2.0"
 
 [dependencies]
-axum = "0.7"
-tokio = { version = "1.0", features = ["macros", "rt-multi-thread", "fs", "net", "io-util"] }
+axum = "0.8"
+tokio = { version = "1.49", features = ["macros", "rt-multi-thread", "fs", "net", "io-util"] }
 rusty_paseto = { version = "0.9", features = ["paserk"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_yaml = "0.9"
-clap = { version = "4.4", features = ["derive"] }
+clap = { version = "4.5", features = ["derive"] }
 chrono = { version = "0.4", features = ["serde"] }
 anyhow = "1.0"
 rand = "0.9"
 log = "0.4"
-env_logger = "0.10"
+env_logger = "0.11"
 tokio-util = { version = "0.7", features = ["io"] }
-askama = "0.12"
+askama = "0.15"
 argon2 = { version = "0.5", features = ["std"] }
-rpassword = "7.3"
-axum-extra = { version = "0.9", features = ["cookie"] }
+rpassword = "7.4"
+axum-extra = { version = "0.10", features = ["cookie"] }
 time = "0.3"
 rust_search = "2.1"
 urlencoding = "2.1"
-governor = "0.6"
+governor = "0.10"
 timedmap = "1.0"
 hex = "0.4"
 url = "2.5"
 # TLS and certificate management dependencies
 rustls = "0.23"
-rustls-pemfile = "2.1"
+rustls-pki-types = { version = "1.13", features = ["std"] }
 axum-server = { version = "0.7", features = ["tls-rustls"] }
 instant-acme = { version = "0.8", features = ["hyper-rustls"] }
 rcgen = "0.14.6"
