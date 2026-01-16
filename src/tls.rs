@@ -449,6 +449,17 @@ pub async fn certificate_renewal_task(mut config: Config, challenge_store: Chall
                         match save_cert_to_config(&mut config, &cert_pem, &key_pem, expiry).await {
                             Ok(()) => {
                                 info!("Certificate renewed successfully");
+
+                                // Save config to disk to persist the new expiry date
+                                match crate::config::save_config(&config).await {
+                                    Ok(()) => {
+                                        info!("💾 Certificate expiry saved to config.yaml");
+                                    }
+                                    Err(e) => {
+                                        error!("Failed to save config after renewal: {}", e);
+                                    }
+                                }
+
                                 // TODO: Notify main application to reload certificate
                                 // This could be done via a channel or by restarting the TLS listener
                             }
