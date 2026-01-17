@@ -47,7 +47,7 @@ You don't need to use unraid to use ryansend, but it does work great! If you jus
 If you want to set up unraid, there are a few steps. First, ryansend isn't in the unraid app store yet, so you'll need to manually install the xml template:
 
 ```
-curl https://raw.githubusercontent.com/rlittlefield/ryansend/refs/heads/main/unraid/ryansend.xml > /boot/config/plugins/dockerMan/templates-user
+curl https://raw.githubusercontent.com/rlittlefield/unraid-repository/refs/heads/main/ryansend.xml > /boot/config/plugins/dockerMan/templates-user
 ```
 
 Now you can easily configure ryansend by going to the Docker menu in Unraid, then clicking the orange "Add Container" button on the bottom left of the page.
