@@ -3,7 +3,7 @@
 
 # ryansend 
 
-ryansend lets you share files on your computer on a public url.
+ryansend lets you securely share files on your computer via a public url, one at a time
 
 <img width="789" height="474" alt="Screenshot 2026-01-09 at 11 41 15 AM" src="https://github.com/user-attachments/assets/107cb9ad-3786-48bc-82d9-21d3a13dd4a9" />
 
