@@ -153,7 +153,11 @@ pub async fn load_config() -> Result<Config> {
 
     // Override TLS port with environment variable if present
     if let Ok(env_tls_port) = std::env::var("RYANSEND_TLS_PORT") {
-        config.tls_port = env_tls_port.parse().ok();
+        config.tls_port = Some(
+            env_tls_port
+                .parse()
+                .unwrap_or(config.tls_port.unwrap_or(3443)),
+        )
     }
 
     // Override cert path with environment variable if present
