@@ -107,6 +107,20 @@ There are three suggested ways to get secure connections:
   - If you want to use manual SSL certificates, you can use a tool like [certbot](https://certbot.eff.org/) or [acme.sh](https://github.com/acmesh-official/acme.sh).
 
 
+## FAQ
+
+- **When would I use this instead of FileBrowser-PNP?**
+  - FileBrowser is a great app and is both more mature and feature filled than ryansend
+  - You might want to use ryansend in some cases:
+    - You want the letsencrypt cert setup
+    - You want single-use urls and not just expiring urls
+    - ryansend's search can be faster in some cases
+  - Or you might prefer FileBrowser-PNP in some cases:
+    - You want multiple users or need long term share access
+    - You need to upload, preview, or move files
+    - You want to be able to revoke URLs
+    - You want short URLs
+
 ## Contributing
 
 We welcome contributions from the community! To contribute to ryansend, please:
