@@ -368,6 +368,32 @@
                         {% endif %}
                     </div>
 
+                    <div class="form-group">
+                        <label for="admin_default_exp_seconds"
+                            >Default Link Expiration (seconds)</label
+                        >
+                        <input
+                            type="number"
+                            id="admin_default_exp_seconds"
+                            name="admin_default_exp_seconds"
+                            value="{{ admin_default_exp_seconds }}"
+                            min="60"
+                            max="31536000"
+                        />
+                        <span class="help-text"
+                            >Default expiration time for generated download
+                            links (default: 3600 = 1 hour, 86400 = 24
+                            hours)</span
+                        >
+                        {% if admin_default_exp_seconds_env_override %}
+                        <div class="env-override">
+                            ⚠️ This value is overridden by
+                            RYANSEND_ADMIN_DEFAULT_EXP_SECONDS environment
+                            variable
+                        </div>
+                        {% endif %}
+                    </div>
+
                     <div class="warning-box">
                         <strong>Password Management</strong>
                         To change the admin password, use the command:

@@ -70,6 +70,7 @@ struct SetupTemplate {
     admin_enabled: bool,
     admin_port: u16,
     admin_sharing_root: String,
+    admin_default_exp_seconds: u64,
     tls_port: String,
     use_letsencrypt_cert: bool,
     tls_acme_email: String,
@@ -78,6 +79,7 @@ struct SetupTemplate {
     port_env_override: bool,
     admin_port_env_override: bool,
     admin_sharing_root_env_override: bool,
+    admin_default_exp_seconds_env_override: bool,
     tls_port_env_override: bool,
     admin_tls_port_env_override: bool,
     success: bool,
@@ -107,6 +109,7 @@ struct SetupForm {
     admin_enabled: Option<String>,
     admin_port: u16,
     admin_sharing_root: String,
+    admin_default_exp_seconds: Option<u64>,
     tls_port: Option<String>,
     use_letsencrypt_cert: Option<String>,
     request_letsencrypt: Option<String>,
@@ -588,11 +591,12 @@ async fn admin_download_handler(
         return make_admin_error_response(StatusCode::NOT_FOUND);
     }
 
-    // Generate a temporary download token (1 hour)
+    // Generate a temporary download token
+    let exp_seconds = admin_config.default_expiration_seconds.unwrap_or(3600);
     let download_token = match generate_token_with_options(
         &state.config,
         &file_path,
-        3600,
+        exp_seconds,
         None,
         query.note.clone(),
     )
@@ -654,14 +658,20 @@ async fn admin_share_handler(
         return make_admin_error_response(StatusCode::NOT_FOUND);
     }
 
-    // Generate share URL (24 hours)
-    let share_url =
-        match generate_url_with_options(&state.config, &file_path, 86400, None, query.note.clone())
-            .await
-        {
-            Ok(url) => url,
-            Err(_) => return make_admin_error_response(StatusCode::INTERNAL_SERVER_ERROR),
-        };
+    // Generate share URL
+    let exp_seconds = admin_config.default_expiration_seconds.unwrap_or(3600);
+    let share_url = match generate_url_with_options(
+        &state.config,
+        &file_path,
+        exp_seconds,
+        None,
+        query.note.clone(),
+    )
+    .await
+    {
+        Ok(url) => url,
+        Err(_) => return make_admin_error_response(StatusCode::INTERNAL_SERVER_ERROR),
+    };
 
     Response::builder()
         .status(StatusCode::OK)
@@ -709,11 +719,12 @@ async fn admin_single_use_download_handler(
         return make_admin_error_response(StatusCode::NOT_FOUND);
     }
 
-    // Generate single-use URL (24 hours with max_uses=1)
+    // Generate single-use URL (with max_uses=1)
+    let exp_seconds = admin_config.default_expiration_seconds.unwrap_or(3600);
     let share_url = match generate_url_with_options(
         &state.config,
         &file_path,
-        86400,
+        exp_seconds,
         Some(1),
         query.note.clone(),
     )
@@ -749,6 +760,8 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
     let port_env_override = std::env::var("RYANSEND_PORT").is_ok();
     let admin_port_env_override = std::env::var("RYANSEND_ADMIN_PORT").is_ok();
     let admin_sharing_root_env_override = std::env::var("RYANSEND_ADMIN_SHARING_ROOT").is_ok();
+    let admin_default_exp_seconds_env_override =
+        std::env::var("RYANSEND_ADMIN_DEFAULT_EXP_SECONDS").is_ok();
     let tls_port_env_override = std::env::var("RYANSEND_TLS_PORT").is_ok();
     let admin_tls_port_env_override = std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok();
 
@@ -761,6 +774,9 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
         admin_sharing_root: admin_config
             .map(|a| a.sharing_root.clone())
             .unwrap_or_default(),
+        admin_default_exp_seconds: admin_config
+            .and_then(|a| a.default_expiration_seconds)
+            .unwrap_or(3600),
         tls_port: state
             .config
             .tls_port
@@ -786,6 +802,7 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
         port_env_override,
         admin_port_env_override,
         admin_sharing_root_env_override,
+        admin_default_exp_seconds_env_override,
         tls_port_env_override,
         admin_tls_port_env_override,
         success: false,
@@ -816,6 +833,9 @@ async fn admin_setup_handler(
             admin_sharing_root: admin_config
                 .map(|a| a.sharing_root.clone())
                 .unwrap_or_default(),
+            admin_default_exp_seconds: admin_config
+                .and_then(|a| a.default_expiration_seconds)
+                .unwrap_or(3600),
             tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
             use_letsencrypt_cert: config.use_letsencrypt_cert,
             tls_acme_email: config
@@ -835,6 +855,10 @@ async fn admin_setup_handler(
             port_env_override: std::env::var("RYANSEND_PORT").is_ok(),
             admin_port_env_override: std::env::var("RYANSEND_ADMIN_PORT").is_ok(),
             admin_sharing_root_env_override: std::env::var("RYANSEND_ADMIN_SHARING_ROOT").is_ok(),
+            admin_default_exp_seconds_env_override: std::env::var(
+                "RYANSEND_ADMIN_DEFAULT_EXP_SECONDS",
+            )
+            .is_ok(),
             tls_port_env_override: std::env::var("RYANSEND_TLS_PORT").is_ok(),
             admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
             success: false,
@@ -882,6 +906,7 @@ async fn admin_setup_handler(
         admin.port = form.admin_port;
         admin.sharing_root = form.admin_sharing_root.clone();
         admin.tls_port = form.admin_tls_port.and_then(|s| s.parse().ok());
+        admin.default_expiration_seconds = form.admin_default_exp_seconds;
     }
 
     // Update TLS configuration
@@ -1133,6 +1158,9 @@ async fn admin_setup_handler(
                 admin_sharing_root: admin_config
                     .map(|a| a.sharing_root.clone())
                     .unwrap_or_default(),
+                admin_default_exp_seconds: admin_config
+                    .and_then(|a| a.default_expiration_seconds)
+                    .unwrap_or(3600),
                 tls_port: config.tls_port.map(|p| p.to_string()).unwrap_or_default(),
                 use_letsencrypt_cert: config.use_letsencrypt_cert,
                 tls_acme_email: config
@@ -1153,6 +1181,10 @@ async fn admin_setup_handler(
                 admin_port_env_override: std::env::var("RYANSEND_ADMIN_PORT").is_ok(),
                 admin_sharing_root_env_override: std::env::var("RYANSEND_ADMIN_SHARING_ROOT")
                     .is_ok(),
+                admin_default_exp_seconds_env_override: std::env::var(
+                    "RYANSEND_ADMIN_DEFAULT_EXP_SECONDS",
+                )
+                .is_ok(),
                 tls_port_env_override: std::env::var("RYANSEND_TLS_PORT").is_ok(),
                 admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
                 success: true,

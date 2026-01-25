@@ -44,6 +44,8 @@ pub struct AdminConfig {
     pub sharing_root: String,
     #[serde(default)]
     pub tls_port: Option<u16>,
+    #[serde(default)]
+    pub default_expiration_seconds: Option<u64>,
 }
 
 impl Config {
@@ -186,6 +188,17 @@ pub async fn load_config() -> Result<Config> {
         }
     }
 
+    // Override admin default expiration seconds with environment variable if present
+    if let Ok(env_exp) = std::env::var("RYANSEND_ADMIN_DEFAULT_EXP_SECONDS") {
+        if let Some(ref mut admin) = config.admin {
+            admin.default_expiration_seconds = Some(
+                env_exp
+                    .parse()
+                    .unwrap_or(admin.default_expiration_seconds.unwrap_or(3600)),
+            );
+        }
+    }
+
     Ok(config)
 }
 
@@ -246,6 +259,7 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         password: password_hash,
         sharing_root: ".".to_string(),
         tls_port: admin_tls_port,
+        default_expiration_seconds: None,
     };
 
     // Use environment variable for TLS port if provided
