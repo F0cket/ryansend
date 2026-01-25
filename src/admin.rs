@@ -90,6 +90,7 @@ struct FileEntry {
     path: String,
     path_display: String, // Truncated path for display
     is_dir: bool,
+    size: u64,
     size_display: String,
 }
 
@@ -349,12 +350,12 @@ async fn admin_files_handler(
             let name = entry.file_name().to_string_lossy().to_string();
 
             let is_dir = entry_path.is_dir();
-            let size_display = if is_dir {
-                "-".to_string()
+            let (size, size_display) = if is_dir {
+                (0, "-".to_string())
             } else {
                 match entry.metadata().await {
-                    Ok(metadata) => format_file_size(metadata.len()),
-                    Err(_) => "?".to_string(),
+                    Ok(metadata) => (metadata.len(), format_file_size(metadata.len())),
+                    Err(_) => (0, "?".to_string()),
                 }
             };
 
@@ -376,6 +377,7 @@ async fn admin_files_handler(
                 path: relative_entry_path,
                 path_display,
                 is_dir,
+                size,
                 size_display,
             });
         }
@@ -481,10 +483,11 @@ async fn perform_search(
             .to_string();
 
         let is_dir = metadata.is_dir();
+        let size = if is_dir { 0 } else { metadata.len() };
         let size_display = if is_dir {
             "-".to_string()
         } else {
-            format_file_size(metadata.len())
+            format_file_size(size)
         };
 
         // Get relative path from sharing root
@@ -510,11 +513,40 @@ async fn perform_search(
             path: relative_path,
             path_display,
             is_dir,
+            size,
             size_display,
         });
     }
 
+    // Sort search results: videos first, then docs/images, then by size desc
+    file_entries.sort_by(|a, b| {
+        let a_priority = get_extension_priority(&a.name);
+        let b_priority = get_extension_priority(&b.name);
+        match a_priority.cmp(&b_priority) {
+            std::cmp::Ordering::Equal => b.size.cmp(&a.size), // size desc
+            other => other,
+        }
+    });
+
     file_entries
+}
+
+/// Returns sort priority based on file extension (lower = higher priority)
+/// 0 = video, 1 = image/document, 2 = other
+fn get_extension_priority(filename: &str) -> u8 {
+    let ext = filename.rsplit('.').next().unwrap_or("").to_lowercase();
+
+    match ext.as_str() {
+        // Videos
+        "mp4" | "mkv" | "avi" | "mov" | "wmv" | "flv" | "webm" | "m4v" | "mpg" | "mpeg" => 0,
+        // Images
+        "jpg" | "jpeg" | "png" | "gif" | "bmp" | "webp" | "svg" | "ico" | "tiff" | "heic" => 1,
+        // Documents
+        "pdf" | "doc" | "docx" | "xls" | "xlsx" | "ppt" | "pptx" | "csv" | "odt" | "ods"
+        | "odp" => 1,
+        // Everything else
+        _ => 2,
+    }
 }
 
 async fn admin_download_handler(
@@ -1284,12 +1316,11 @@ pub async fn run_admin_server(
     // Check if TLS is also configured for admin panel
     let has_admin_tls = config.has_tls_cert() && admin_config.tls_port.is_some();
 
-    if has_admin_tls {
+    if let (true, Some(tls_port)) = (has_admin_tls, admin_config.tls_port) {
         // Load TLS certificate and run both HTTP and HTTPS servers
         match crate::tls::load_cert_from_config(&config).await? {
             Some(tls_cert) => {
                 let server_config = tls_cert.into_server_config()?;
-                let tls_port = admin_config.tls_port.unwrap(); // Safe: checked in has_admin_tls
 
                 info!("🔒 Starting admin server on https://0.0.0.0:{}", tls_port);
 
