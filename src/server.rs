@@ -404,6 +404,7 @@ pub async fn run_server(
                             return Err(anyhow!("Failed to parse HTTPS bind address: {}", e));
                         }
                     };
+
                     axum_server::bind_rustls(addr, rustls_config)
                         .serve(https_app.into_make_service())
                         .await

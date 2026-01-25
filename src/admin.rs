@@ -11,14 +11,16 @@ use axum::{
 };
 use axum_extra::extract::{cookie::Cookie, CookieJar};
 use chrono::{Duration, Utc};
+use fast_glob::glob_match;
 use log::{error, info};
-use rust_search::{similarity_sort, SearchBuilder};
+
 use rusty_paseto::prelude::*;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs;
 use urlencoding::encode;
+use walkdir::WalkDir;
 
 use crate::auth::{
     generate_token_with_options, generate_url_with_options, verify_admin_token, AdminTokenClaims,
@@ -420,26 +422,46 @@ async fn admin_files_handler(
         .expect("Failed to build file browser response")
 }
 
+/// Check if a search query contains glob pattern characters
+fn has_glob_chars(query: &str) -> bool {
+    query.contains('*') || query.contains('?') || query.contains('[') || query.contains('{')
+}
+
 async fn perform_search(
     current_dir: &Path,
     search_query: &str,
     canonical_base: &Path,
 ) -> Vec<FileEntry> {
-    // Use rust_search to find files within the current directory only
-    let mut search_results: Vec<String> = SearchBuilder::default()
-        .location(current_dir.to_string_lossy().as_ref())
-        .search_input(search_query)
-        .limit(500) // even if we don't return all results, we need it for the sort
-        .depth(10) // Search recursively from current directory
-        .ignore_case()
-        .build()
+    // Build the search pattern:
+    // - Plain text "foo" becomes "**/*foo*" (substring match anywhere in tree)
+    // - Glob without path "*.txt" becomes "**/*.txt" (match in any subdir)
+    // - Glob with path "subdir/*.txt" stays as-is
+    let pattern = if has_glob_chars(search_query) {
+        if search_query.contains('/') {
+            search_query.to_string()
+        } else {
+            format!("**/{}", search_query)
+        }
+    } else {
+        format!("**/*{}*", search_query)
+    };
+
+    // Use walkdir + fast-glob for pattern matching
+    let search_results: Vec<String> = WalkDir::new(current_dir)
+        .max_depth(10)
+        .into_iter()
+        .filter_map(|e| e.ok())
+        .filter(|entry| {
+            let relative_path = entry
+                .path()
+                .strip_prefix(current_dir)
+                .map(|p| p.to_string_lossy())
+                .unwrap_or_else(|_| entry.path().to_string_lossy());
+            glob_match(&pattern, relative_path.as_ref())
+        })
+        .take(50)
+        .map(|e| e.path().to_string_lossy().into_owned())
         .collect();
-
-    // Sort by similarity using rust_search's similarity_sort
-    similarity_sort(&mut search_results, search_query);
-
-    // Limit to top 50 results after sorting
-    search_results.truncate(50);
 
     let mut file_entries = Vec::new();
 
@@ -1242,71 +1264,14 @@ pub async fn run_admin_server(
         .with_state(state)
         .layer(middleware::from_fn(logging_middleware));
 
-    // Check if TLS is configured for admin panel
-    let has_admin_tls = config.has_tls_cert() && admin_config.tls_port.is_some();
-
-    if has_admin_tls {
-        // Load TLS certificate
-        match crate::tls::load_cert_from_config(&config).await? {
-            Some(tls_cert) => {
-                let server_config = tls_cert.into_server_config()?;
-                let tls_port = match admin_config.tls_port {
-                    Some(port) => port,
-                    None => {
-                        error!("Admin TLS port is not configured");
-                        return Ok(());
-                    }
-                };
-
-                info!("🔒 Starting admin server on https://0.0.0.0:{}", tls_port);
-
-                let bind_address = format!("0.0.0.0:{}", tls_port);
-
-                let addr: std::net::SocketAddr = match bind_address.parse() {
-                    Ok(addr) => addr,
-                    Err(e) => {
-                        error!(
-                            "Failed to parse admin HTTPS bind address '{}': {}",
-                            bind_address, e
-                        );
-                        return Ok(());
-                    }
-                };
-
-                let https_server = axum_server::bind_rustls(
-                    addr,
-                    axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(
-                        server_config,
-                    )),
-                )
-                .serve(app.into_make_service());
-
-                tokio::select! {
-                    result = https_server => {
-                        result.map_err(|e| anyhow::anyhow!("Admin HTTPS server error: {}", e))?;
-                    }
-                    _ = reload_rx.recv() => {
-                        info!("Admin server shutting down for reload...");
-                    }
-                }
-
-                return Ok(());
-            }
-            None => {
-                info!("⚠️  Admin TLS configured but certificate could not be loaded, falling back to HTTP");
-                // Fall through to HTTP-only mode
-            }
-        }
-    }
-
-    // HTTP-only mode
+    // Always start HTTP server
     info!(
         "Starting admin server on http://0.0.0.0:{}",
         admin_config.port
     );
 
-    let bind_address = format!("0.0.0.0:{}", admin_config.port);
-    let listener = tokio::net::TcpListener::bind(&bind_address)
+    let http_bind_address = format!("0.0.0.0:{}", admin_config.port);
+    let http_listener = tokio::net::TcpListener::bind(&http_bind_address)
         .await
         .map_err(|e| {
             anyhow::anyhow!(
@@ -1316,7 +1281,68 @@ pub async fn run_admin_server(
             )
         })?;
 
-    axum::serve(listener, app)
+    // Check if TLS is also configured for admin panel
+    let has_admin_tls = config.has_tls_cert() && admin_config.tls_port.is_some();
+
+    if has_admin_tls {
+        // Load TLS certificate and run both HTTP and HTTPS servers
+        match crate::tls::load_cert_from_config(&config).await? {
+            Some(tls_cert) => {
+                let server_config = tls_cert.into_server_config()?;
+                let tls_port = admin_config.tls_port.unwrap(); // Safe: checked in has_admin_tls
+
+                info!("🔒 Starting admin server on https://0.0.0.0:{}", tls_port);
+
+                let https_bind_address = format!("0.0.0.0:{}", tls_port);
+                let https_addr: std::net::SocketAddr = match https_bind_address.parse() {
+                    Ok(addr) => addr,
+                    Err(e) => {
+                        error!(
+                            "Failed to parse admin HTTPS bind address '{}': {}",
+                            https_bind_address, e
+                        );
+                        return Ok(());
+                    }
+                };
+
+                // Clone app for HTTPS server
+                let https_app = app.clone();
+
+                let https_server = axum_server::bind_rustls(
+                    https_addr,
+                    axum_server::tls_rustls::RustlsConfig::from_config(std::sync::Arc::new(
+                        server_config,
+                    )),
+                )
+                .serve(https_app.into_make_service());
+
+                let http_server = axum::serve(http_listener, app).with_graceful_shutdown(async {
+                    // This future never completes - shutdown is handled by select!
+                    std::future::pending::<()>().await
+                });
+
+                tokio::select! {
+                    result = https_server => {
+                        result.map_err(|e| anyhow::anyhow!("Admin HTTPS server error: {}", e))?;
+                    }
+                    result = http_server => {
+                        result.map_err(|e| anyhow::anyhow!("Admin HTTP server error: {}", e))?;
+                    }
+                    _ = reload_rx.recv() => {
+                        info!("Admin server shutting down for reload...");
+                    }
+                }
+
+                return Ok(());
+            }
+            None => {
+                info!("⚠️  Admin TLS configured but certificate could not be loaded, running HTTP only");
+            }
+        }
+    }
+
+    // HTTP-only mode (either TLS not configured, or cert failed to load)
+    axum::serve(http_listener, app)
         .with_graceful_shutdown(async move {
             reload_rx.recv().await.ok();
             info!("Admin server shutting down for reload...");
@@ -1356,41 +1382,41 @@ mod tests {
             .canonicalize()
             .expect("Failed to canonicalize temp path");
 
-        // Test search for "file" in root directory - should find files but not nested ones
-        let results = perform_search(&canonical_base, "file", &canonical_base).await;
+        // Test glob search for "*file*" in root directory - should find files with "file" in name
+        let results = perform_search(&canonical_base, "*file*", &canonical_base).await;
         assert!(!results.is_empty(), "Search should find files");
-        // Should find files in root directory and subdirectories
+        // Should find files in root directory and subdirectories (test_file.txt, another_file.rs, nested_file.log)
         assert_eq!(
             results.len(),
             3,
-            "Should find 3 files starting from root directory"
+            "Should find 3 files matching *file* starting from root directory"
         );
 
-        // Test search for "nested" in root directory - should find nested file in subdirectory
-        let nested_results = perform_search(&canonical_base, "nested", &canonical_base).await;
+        // Test glob search for "*nested*" in root directory - should find nested file in subdirectory
+        let nested_results = perform_search(&canonical_base, "*nested*", &canonical_base).await;
         assert!(
             !nested_results.is_empty(),
             "Search should find nested files when starting from root"
         );
 
-        // Test search for "nested" in subdirectory - should only find the nested file
+        // Test glob search for "*nested*" in subdirectory - should only find the nested file
         let subdir_path = canonical_base.join("subdir");
-        let nested_in_subdir = perform_search(&subdir_path, "nested", &canonical_base).await;
+        let nested_in_subdir = perform_search(&subdir_path, "*nested*", &canonical_base).await;
         assert_eq!(
             nested_in_subdir.len(),
             1,
             "Search should find exactly 1 nested file when starting from subdir"
         );
 
-        // Test search for "test"
-        let test_results = perform_search(&canonical_base, "test", &canonical_base).await;
-        assert!(!test_results.is_empty(), "Search should find test files");
+        // Test glob search for "*.txt" - should find only txt files
+        let txt_results = perform_search(&canonical_base, "*.txt", &canonical_base).await;
+        assert_eq!(txt_results.len(), 1, "Should find 1 txt file");
 
-        // Test search for non-existent term
-        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+        // Test glob search for non-matching pattern
+        let empty_results = perform_search(&canonical_base, "*nonexistent*", &canonical_base).await;
         assert!(
             empty_results.is_empty(),
-            "Search should return empty for non-existent terms"
+            "Search should return empty for non-matching patterns"
         );
     }
 
@@ -1408,15 +1434,15 @@ mod tests {
             .canonicalize()
             .expect("Failed to canonicalize temp path");
 
-        // Search for something that won't be found
-        let empty_results = perform_search(&canonical_base, "nonexistent", &canonical_base).await;
+        // Search for something that won't be found (using glob pattern)
+        let empty_results = perform_search(&canonical_base, "*nonexistent*", &canonical_base).await;
 
         // Verify no results
         assert!(empty_results.is_empty(), "Should find no results");
 
         // Test that we can distinguish between no search and empty search results
         // This verifies the template will show the "no results" message correctly
-        let search_query = "nonexistent".to_string();
+        let search_query = "*nonexistent*".to_string();
         let search_query_encoded = encode(&search_query).to_string();
         let has_search_results = true; // Search was performed
 

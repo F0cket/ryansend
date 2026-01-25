@@ -23,7 +23,8 @@ argon2 = { version = "0.5", features = ["std"] }
 rpassword = "7.4"
 axum-extra = { version = "0.10", features = ["cookie"] }
 time = "0.3"
-rust_search = "2.1"
+fast-glob = "1.0"
+walkdir = "2.5"
 urlencoding = "2.1"
 governor = "0.10"
 timedmap = "1.0"
