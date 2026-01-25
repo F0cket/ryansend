@@ -434,21 +434,21 @@ async fn perform_search(
     search_query: &str,
     canonical_base: &Path,
 ) -> Vec<FileEntry> {
-    // Build the search pattern:
+    // Build the search pattern (lowercased for case-insensitive matching):
     // - Plain text "foo" becomes "**/*foo*" (substring match anywhere in tree)
     // - Glob without path "*.txt" becomes "**/*.txt" (match in any subdir)
     // - Glob with path "subdir/*.txt" stays as-is
     let pattern = if has_glob_chars(search_query) {
         if search_query.contains('/') {
-            search_query.to_string()
+            search_query.to_lowercase()
         } else {
-            format!("**/{}", search_query)
+            format!("**/{}", search_query.to_lowercase())
         }
     } else {
-        format!("**/*{}*", search_query)
+        format!("**/*{}*", search_query.to_lowercase())
     };
 
-    // Use walkdir + fast-glob for pattern matching
+    // Use walkdir + fast-glob for pattern matching (case-insensitive)
     let search_results: Vec<String> = WalkDir::new(current_dir)
         .max_depth(10)
         .into_iter()
@@ -457,9 +457,9 @@ async fn perform_search(
             let relative_path = entry
                 .path()
                 .strip_prefix(current_dir)
-                .map(|p| p.to_string_lossy())
-                .unwrap_or_else(|_| entry.path().to_string_lossy());
-            glob_match(&pattern, relative_path.as_ref())
+                .map(|p| p.to_string_lossy().to_lowercase())
+                .unwrap_or_else(|_| entry.path().to_string_lossy().to_lowercase());
+            glob_match(&pattern, relative_path.as_str())
         })
         .take(50)
         .map(|e| e.path().to_string_lossy().into_owned())
