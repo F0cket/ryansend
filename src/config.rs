@@ -36,6 +36,15 @@ pub struct LetsEncryptConfig {
     pub acme_email: Option<String>,
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone, Default, PartialEq)]
+pub enum AdminTheme {
+    #[default]
+    #[serde(rename = "light")]
+    Light,
+    #[serde(rename = "dark")]
+    Dark,
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct AdminConfig {
     pub enabled: bool,
@@ -48,6 +57,8 @@ pub struct AdminConfig {
     pub default_expiration_seconds: Option<u64>,
     #[serde(default)]
     pub hashed_sharing_secrets: Vec<String>,
+    #[serde(default)]
+    pub theme: AdminTheme,
 }
 
 impl Config {
@@ -263,6 +274,7 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         tls_port: admin_tls_port,
         default_expiration_seconds: None,
         hashed_sharing_secrets: Vec::new(),
+        theme: AdminTheme::default(),
     };
 
     // Use environment variable for TLS port if provided

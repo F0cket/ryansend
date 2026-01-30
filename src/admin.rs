@@ -25,7 +25,19 @@ use walkdir::WalkDir;
 use crate::auth::{
     generate_token_with_options, generate_url_with_options, verify_admin_token, AdminTokenClaims,
 };
-use crate::config::Config;
+use crate::config::{AdminTheme, Config};
+
+// Embed CSS at compile time
+const LIGHT_THEME_CSS: &str = include_str!("../templates/light-theme.css");
+const DARK_THEME_CSS: &str = include_str!("../templates/dark-theme.css");
+
+/// Get the CSS content for the given theme
+fn get_theme_css(theme: &AdminTheme) -> &'static str {
+    match theme {
+        AdminTheme::Light => LIGHT_THEME_CSS,
+        AdminTheme::Dark => DARK_THEME_CSS,
+    }
+}
 use crate::error::{handle_404, make_admin_error_response};
 use crate::logging_middleware::logging_middleware;
 use crate::rate_limit::{
@@ -45,6 +57,7 @@ pub struct AdminAppState {
 #[template(path = "login.html")]
 struct LoginTemplate {
     error: Option<String>,
+    theme_css: &'static str,
 }
 
 #[derive(Template)]
@@ -59,6 +72,7 @@ struct FileBrowserTemplate {
     search_results: Vec<FileEntry>,
     has_search_results: bool,
     remove_kofi: bool,
+    theme_css: &'static str,
 }
 
 #[derive(Template)]
@@ -84,12 +98,16 @@ struct SetupTemplate {
     admin_tls_port_env_override: bool,
     success: bool,
     error: String,
+    theme: String,
+    theme_css: &'static str,
 }
 
 #[derive(Template)]
 #[template(path = "tunnel_secret.html")]
 struct TunnelSecretTemplate {
     secret: String,
+    remove_kofi: bool,
+    theme_css: &'static str,
 }
 
 #[derive(Clone)]
@@ -116,6 +134,7 @@ struct SetupForm {
     admin_port: u16,
     admin_sharing_root: String,
     admin_default_exp_seconds: Option<u64>,
+    admin_theme: Option<String>,
     tls_port: Option<String>,
     use_letsencrypt_cert: Option<String>,
     request_letsencrypt: Option<String>,
@@ -192,8 +211,17 @@ async fn admin_root_handler(State(state): State<AdminAppState>, cookies: CookieJ
         .expect("Failed to build redirect response to admin login")
 }
 
-async fn admin_login_page() -> Html<String> {
-    let template = LoginTemplate { error: None };
+async fn admin_login_page(State(state): State<AdminAppState>) -> Html<String> {
+    let theme = state
+        .config
+        .admin
+        .as_ref()
+        .map(|a| &a.theme)
+        .unwrap_or(&AdminTheme::Light);
+    let template = LoginTemplate {
+        error: None,
+        theme_css: get_theme_css(theme),
+    };
     Html(
         template
             .render()
@@ -216,6 +244,7 @@ async fn admin_login_handler(
     if !is_valid {
         let template = LoginTemplate {
             error: Some("Invalid password".to_string()),
+            theme_css: get_theme_css(&admin_config.theme),
         };
         let html = template
             .render()
@@ -411,6 +440,16 @@ async fn admin_files_handler(
         ".".to_string()
     };
 
+    // Load theme from disk config to get latest saved value
+    let theme = match crate::config::load_config().await {
+        Ok(cfg) => cfg.admin.map(|a| a.theme).unwrap_or(AdminTheme::Light),
+        Err(_) => state
+            .config
+            .admin
+            .as_ref()
+            .map(|a| a.theme.clone())
+            .unwrap_or(AdminTheme::Light),
+    };
     let template = FileBrowserTemplate {
         current_path,
         entries,
@@ -421,6 +460,7 @@ async fn admin_files_handler(
         search_results,
         has_search_results,
         remove_kofi: state.config.remove_kofi,
+        theme_css: get_theme_css(&theme),
     };
 
     let html = template
@@ -782,7 +822,17 @@ async fn generate_tunnel_secret_handler(State(state): State<AdminAppState>) -> R
     });
 
     // Render template with the secret
-    let template = TunnelSecretTemplate { secret };
+    let theme = state
+        .config
+        .admin
+        .as_ref()
+        .map(|a| &a.theme)
+        .unwrap_or(&AdminTheme::Light);
+    let template = TunnelSecretTemplate {
+        secret,
+        remove_kofi: state.config.remove_kofi,
+        theme_css: get_theme_css(theme),
+    };
 
     match template.render() {
         Ok(html) => Html(html).into_response(),
@@ -820,6 +870,7 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
     let tls_port_env_override = std::env::var("RYANSEND_TLS_PORT").is_ok();
     let admin_tls_port_env_override = std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok();
 
+    let theme = admin_config.map(|a| &a.theme).unwrap_or(&AdminTheme::Light);
     let template = SetupTemplate {
         base_url: state.config.base_url.clone(),
         port: state.config.port,
@@ -862,6 +913,11 @@ async fn admin_setup_page(State(state): State<AdminAppState>) -> Html<String> {
         admin_tls_port_env_override,
         success: false,
         error: String::new(),
+        theme: match theme {
+            AdminTheme::Light => "light".to_string(),
+            AdminTheme::Dark => "dark".to_string(),
+        },
+        theme_css: get_theme_css(theme),
     };
 
     Html(
@@ -878,6 +934,7 @@ async fn admin_setup_handler(
     // Helper function to create error response
     let make_error_response = |config: &crate::config::Config, error_msg: String| {
         let admin_config = config.admin.as_ref();
+        let theme = admin_config.map(|a| &a.theme).unwrap_or(&AdminTheme::Light);
 
         let template = SetupTemplate {
             base_url: config.base_url.clone(),
@@ -918,6 +975,11 @@ async fn admin_setup_handler(
             admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
             success: false,
             error: error_msg,
+            theme: match theme {
+                AdminTheme::Light => "light".to_string(),
+                AdminTheme::Dark => "dark".to_string(),
+            },
+            theme_css: get_theme_css(theme),
         };
         let html = template
             .render()
@@ -962,6 +1024,10 @@ async fn admin_setup_handler(
         admin.sharing_root = form.admin_sharing_root.clone();
         admin.tls_port = form.admin_tls_port.and_then(|s| s.parse().ok());
         admin.default_expiration_seconds = form.admin_default_exp_seconds;
+        admin.theme = match form.admin_theme.as_deref() {
+            Some("dark") => AdminTheme::Dark,
+            _ => AdminTheme::Light,
+        };
     }
 
     // Update TLS configuration
@@ -1203,6 +1269,7 @@ async fn admin_setup_handler(
     match crate::config::save_config(&config).await {
         Ok(_) => {
             let admin_config = config.admin.as_ref();
+            let theme = admin_config.map(|a| &a.theme).unwrap_or(&AdminTheme::Light);
 
             let template = SetupTemplate {
                 base_url: config.base_url.clone(),
@@ -1244,6 +1311,11 @@ async fn admin_setup_handler(
                 admin_tls_port_env_override: std::env::var("RYANSEND_ADMIN_TLS_PORT").is_ok(),
                 success: true,
                 error: String::new(),
+                theme: match theme {
+                    AdminTheme::Light => "light".to_string(),
+                    AdminTheme::Dark => "dark".to_string(),
+                },
+                theme_css: get_theme_css(theme),
             };
             let html = template
                 .render()
@@ -1642,6 +1714,7 @@ mod tests {
             search_results: vec![],
             has_search_results: false,
             remove_kofi: false, // Ko-fi link should be visible
+            theme_css: LIGHT_THEME_CSS,
         };
 
         let template_without_kofi = FileBrowserTemplate {
@@ -1654,6 +1727,7 @@ mod tests {
             search_results: vec![],
             has_search_results: false,
             remove_kofi: true, // Ko-fi link should be hidden
+            theme_css: LIGHT_THEME_CSS,
         };
 
         let html_with_kofi = template_with_kofi
