@@ -24,6 +24,10 @@ impl AppError {
         Self::new(StatusCode::NOT_FOUND, error)
     }
 
+    pub fn unauthorized(error: anyhow::Error) -> Self {
+        Self::new(StatusCode::UNAUTHORIZED, error)
+    }
+
     pub fn internal_server_error(error: anyhow::Error) -> Self {
         Self::new(StatusCode::INTERNAL_SERVER_ERROR, error)
     }

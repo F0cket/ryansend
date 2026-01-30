@@ -10,6 +10,7 @@ mod logging_middleware;
 mod rate_limit;
 mod server;
 mod tls;
+mod tunnel;
 
 use anyhow::Result;
 use clap::{Parser, Subcommand};
@@ -50,6 +51,18 @@ enum Commands {
         path: PathBuf,
         #[arg(long, default_value = "3600")]
         expires_in: u64, // seconds, default 1 hour
+    },
+    Send {
+        path: PathBuf,
+        #[arg(long, default_value = "3600")]
+        expires_in: u64, // seconds, default 1 hour
+        #[arg(
+            long,
+            help = "Server URL (e.g., http://localhost:3000). Falls back to RYANSEND_BASE_URL env var"
+        )]
+        server_addr: Option<String>,
+        #[arg(long, help = "Tunnel secret for authentication")]
+        tunnel_secret: Option<String>,
     },
     SetPassword,
 }
@@ -223,6 +236,107 @@ async fn main() -> Result<()> {
                 }
                 Err(e) => {
                     error!("Error generating token: {}", e);
+                    std::process::exit(1);
+                }
+            }
+        }
+        Commands::Send {
+            path,
+            expires_in,
+            server_addr,
+            tunnel_secret,
+        } => {
+            use crate::tunnel::TunnelClient;
+            use rand::Rng;
+
+            // Resolve server address - check arg or env var
+            let server_addr = match server_addr.or_else(|| std::env::var("RYANSEND_BASE_URL").ok())
+            {
+                Some(s) if !s.is_empty() => s,
+                _ => {
+                    error!("Server address required. Use --server-addr or set RYANSEND_BASE_URL environment variable");
+                    std::process::exit(1);
+                }
+            };
+
+            // Require tunnel secret - check arg or env var
+            let secret = match tunnel_secret
+                .or_else(|| std::env::var("RYANSEND_TUNNEL_SECRET").ok())
+            {
+                Some(s) => s,
+                None => {
+                    error!("Tunnel secret required. Use --tunnel-secret or set RYANSEND_TUNNEL_SECRET environment variable");
+                    error!(
+                        "Ask your server admin to generate a tunnel secret from the admin panel"
+                    );
+                    std::process::exit(1);
+                }
+            };
+
+            info!("Starting tunnel client to share file: {}", path.display());
+
+            // Verify file exists
+            if !path.exists() {
+                error!("File not found: {}", path.display());
+                std::process::exit(1);
+            }
+
+            // Generate a random file ID
+            let mut id_bytes = [0u8; 8];
+            rand::rng().fill(&mut id_bytes);
+            let file_id = hex::encode(id_bytes);
+
+            info!("Connecting to server at: {}", server_addr);
+
+            // Create tunnel client with secret
+            let client = TunnelClient::new(server_addr.clone(), secret);
+
+            // Announce and start serving the file
+            let file_info = match client.announce_and_serve(&path, file_id.clone()).await {
+                Ok(info) => info,
+                Err(e) => {
+                    error!("Failed to share file: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            // Load config to generate URL
+            let config = match load_config().await {
+                Ok(config) => config,
+                Err(e) => {
+                    error!("Failed to load config: {}", e);
+                    std::process::exit(1);
+                }
+            };
+
+            // Generate download URL
+            match auth::generate_tunnel_url(
+                &config,
+                file_info.id.clone(),
+                file_info.name.clone(),
+                file_info.size,
+                expires_in,
+            )
+            .await
+            {
+                Ok(download_url) => {
+                    println!("✅ File shared successfully!");
+                    println!("📁 File: {}", file_info.name);
+                    println!("📊 Size: {} bytes", file_info.size);
+                    println!("🔗 Share URL: {}", download_url);
+                    println!("⏱️  Token expires in {} seconds", expires_in);
+                    println!("\n⚠️  Keep this terminal open to maintain the connection!");
+                    info!(
+                        "Tunnel established for file: {} (id: {}, expires in {}s)",
+                        file_info.name, file_info.id, expires_in
+                    );
+
+                    // Keep the process alive
+                    tokio::signal::ctrl_c().await.ok();
+                    println!("\n🛑 Shutting down...");
+                }
+                Err(e) => {
+                    error!("Error generating URL: {}", e);
                     std::process::exit(1);
                 }
             }

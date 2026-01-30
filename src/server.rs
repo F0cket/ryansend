@@ -1,4 +1,5 @@
 use anyhow::{anyhow, Result};
+
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -19,11 +20,12 @@ use tokio::io::{AsyncReadExt, AsyncSeekExt};
 use tokio::sync::Mutex;
 use tokio_util::io::ReaderStream;
 
-use crate::auth::verify_token_and_get_claims;
+use crate::auth::{verify_token_and_get_claims, TokenSource};
 use crate::config::Config;
 use crate::error::{handle_404, AppError, AppResult};
 use crate::logging_middleware::logging_middleware;
 use crate::tls::{self, ChallengeStore};
+use crate::tunnel::{TunnelFileInfo, TunnelManager};
 use crate::ReloadSignal;
 
 #[derive(Debug, Clone)]
@@ -84,11 +86,40 @@ fn parse_range_header(range_header: &str, file_size: u64) -> Option<ByteRange> {
     Some(range)
 }
 
+/// Extract and verify tunnel secret from Authorization header
+fn extract_and_verify_tunnel_secret(headers: &HeaderMap, config: &Config) -> Result<(), AppError> {
+    // Get Authorization header
+    let auth_header = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|h| h.to_str().ok())
+        .ok_or_else(|| AppError::unauthorized(anyhow::anyhow!("Missing Authorization header")))?;
+
+    // Extract Bearer token
+    let secret = auth_header.strip_prefix("Bearer ").ok_or_else(|| {
+        AppError::unauthorized(anyhow::anyhow!("Invalid Authorization header format"))
+    })?;
+
+    // Verify against admin config
+    let admin_config = config
+        .admin
+        .as_ref()
+        .ok_or_else(|| AppError::unauthorized(anyhow::anyhow!("Admin not configured")))?;
+
+    if crate::config::verify_tunnel_secret(secret, &admin_config.hashed_sharing_secrets) {
+        Ok(())
+    } else {
+        Err(AppError::unauthorized(anyhow::anyhow!(
+            "Invalid tunnel secret"
+        )))
+    }
+}
+
 #[derive(Clone)]
 pub struct AppState {
     pub config: Config,
     pub download_tracker: Arc<Mutex<TimedMap<String, u32>>>,
     pub challenge_store: ChallengeStore,
+    pub tunnel_manager: Option<Arc<TunnelManager>>,
 }
 
 #[derive(Deserialize)]
@@ -114,6 +145,148 @@ pub async fn acme_challenge_handler(
             (StatusCode::NOT_FOUND, "Challenge not found".to_string())
         }
     }
+}
+
+/// Handle tunnel file announcement from client
+/// POST /tunnel/announce
+pub async fn tunnel_announce_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    axum::Json(file_info): axum::Json<TunnelFileInfo>,
+) -> AppResult<Response> {
+    // Verify tunnel secret
+    extract_and_verify_tunnel_secret(&headers, &state.config)?;
+    let tunnel_manager = state
+        .tunnel_manager
+        .as_ref()
+        .ok_or_else(|| AppError::not_found(anyhow::anyhow!("Tunnel manager not available")))?;
+
+    info!(
+        "Client announcing tunnel file: {} ({} bytes, id: {})",
+        file_info.name, file_info.size, file_info.id
+    );
+
+    tunnel_manager
+        .register_tunnel(file_info)
+        .await
+        .map_err(|e| anyhow::anyhow!("Failed to register tunnel: {}", e))?;
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .map_err(|e| anyhow::anyhow!("Failed to build response: {}", e))?)
+}
+
+/// Handle long polling for upload requests from client
+/// GET /tunnel/poll?file_id=xxx
+/// This holds the connection open for up to 30 seconds waiting for a download request
+pub async fn tunnel_poll_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+) -> AppResult<Response> {
+    // Verify tunnel secret
+    extract_and_verify_tunnel_secret(&headers, &state.config)?;
+    let file_id = params
+        .get("file_id")
+        .ok_or_else(|| AppError::not_found(anyhow::anyhow!("Missing file_id parameter")))?;
+
+    let tunnel_manager = state
+        .tunnel_manager
+        .as_ref()
+        .ok_or_else(|| AppError::not_found(anyhow::anyhow!("Tunnel manager not available")))?;
+
+    debug!("Client polling for file: {}", file_id);
+
+    // This will hold the connection open for up to 30 seconds
+    // Returns Upload if download is requested, or Wait if timeout
+    let response = tunnel_manager.poll_for_upload(file_id).await.map_err(|e| {
+        warn!("Poll error for file {}: {}", file_id, e);
+        AppError::not_found(e)
+    })?;
+
+    debug!("Poll response for file {}: {:?}", file_id, response);
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&response)?))
+        .map_err(|e| anyhow::anyhow!("Failed to build response: {}", e))?)
+}
+
+/// Handle streaming file upload from client
+/// POST /tunnel/upload?file_id=xxx
+/// The entire file is streamed as the request body
+pub async fn tunnel_upload_handler(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Query(params): Query<std::collections::HashMap<String, String>>,
+    body: Body,
+) -> AppResult<Response> {
+    use futures::StreamExt;
+
+    // Verify tunnel secret
+    extract_and_verify_tunnel_secret(&headers, &state.config)?;
+
+    let file_id = params
+        .get("file_id")
+        .ok_or_else(|| AppError::not_found(anyhow::anyhow!("Missing file_id parameter")))?
+        .clone();
+
+    let tunnel_manager = state
+        .tunnel_manager
+        .as_ref()
+        .ok_or_else(|| AppError::not_found(anyhow::anyhow!("Tunnel manager not available")))?;
+
+    info!("Starting to receive streaming upload for file: {}", file_id);
+
+    // Get the sender that pipes to the download response
+    let sender = tunnel_manager
+        .get_upload_sender(&file_id)
+        .await
+        .ok_or_else(|| {
+            AppError::not_found(anyhow::anyhow!("No active download waiting for this file"))
+        })?;
+
+    // Stream the body bytes directly to the download handler
+    let mut stream = body.into_data_stream();
+    let mut total_bytes = 0u64;
+
+    while let Some(chunk_result) = stream.next().await {
+        match chunk_result {
+            Ok(bytes) => {
+                total_bytes += bytes.len() as u64;
+                if sender.send(Ok(bytes)).await.is_err() {
+                    warn!("Download handler disconnected for file: {}", file_id);
+                    break;
+                }
+            }
+            Err(e) => {
+                error!("Error reading upload stream: {}", e);
+                // Close the channel by dropping sender
+                drop(sender);
+                tunnel_manager.finish_upload(&file_id).await;
+                return Err(AppError::from(anyhow::anyhow!(
+                    "Upload stream error: {}",
+                    e
+                )));
+            }
+        }
+    }
+
+    // Signal completion by dropping the sender
+    drop(sender);
+    tunnel_manager.finish_upload(&file_id).await;
+
+    info!(
+        "Upload stream complete: {} bytes for file: {}",
+        total_bytes, file_id
+    );
+
+    Ok(Response::builder()
+        .status(StatusCode::OK)
+        .body(Body::empty())
+        .map_err(|e| anyhow::anyhow!("Failed to build response: {}", e))?)
 }
 
 pub async fn download_handler(
@@ -167,6 +340,84 @@ pub async fn download_handler(
             current_uses + 1,
             max_uses
         );
+    }
+
+    // Check if this is a tunnel-based file or filesystem file
+    match claims.source {
+        TokenSource::Tunnel => {
+            // Handle tunnel-based file transfer
+            let tunnel_manager = state.tunnel_manager.as_ref().ok_or_else(|| {
+                AppError::not_found(anyhow::anyhow!("Tunnel manager not available"))
+            })?;
+
+            let tunnel_conn = tunnel_manager
+                .get_connection(&claims.id)
+                .await
+                .ok_or_else(|| {
+                    warn!("Tunnel connection not found for file: {}", claims.id);
+                    AppError::not_found(anyhow::anyhow!(
+                        "Tunnel connection not found for this file"
+                    ))
+                })?;
+
+            info!(
+                "Streaming file '{}' from tunnel [token_id: {}]",
+                claims.path, claims.id
+            );
+
+            let file_size = tunnel_conn.file_info.size;
+            let file_name = tunnel_conn.file_info.name.clone();
+
+            // Request file stream from tunnel and get byte receiver
+            let mut byte_rx = tunnel_manager
+                .request_file_stream(&claims.id)
+                .await
+                .map_err(|e| anyhow::anyhow!("Failed to request file from tunnel: {}", e))?;
+
+            // Convert the byte receiver into a stream that pipes directly from upload
+            let stream = async_stream::stream! {
+                while let Some(result) = byte_rx.recv().await {
+                    match result {
+                        Ok(bytes) => {
+                            yield Ok::<bytes::Bytes, std::io::Error>(bytes);
+                        }
+                        Err(_) => {
+                            error!("Error receiving bytes from tunnel");
+                            yield Err(std::io::Error::other("Upload stream error"));
+                            break;
+                        }
+                    }
+                }
+            };
+
+            let body = Body::from_stream(stream);
+
+            let mut response = Response::builder()
+                .status(StatusCode::OK)
+                .body(body)
+                .map_err(|e| anyhow::anyhow!("Failed to build response: {}", e))?;
+
+            let response_headers = response.headers_mut();
+            response_headers.insert(
+                header::CONTENT_TYPE,
+                HeaderValue::from_static("application/octet-stream"),
+            );
+            response_headers.insert(
+                header::CONTENT_DISPOSITION,
+                HeaderValue::from_str(&format!("attachment; filename=\"{}\"", file_name))
+                    .unwrap_or_else(|_| HeaderValue::from_static("attachment")),
+            );
+            response_headers.insert(
+                header::CONTENT_LENGTH,
+                HeaderValue::from_str(&file_size.to_string())
+                    .unwrap_or_else(|_| HeaderValue::from_static("0")),
+            );
+
+            return Ok(response);
+        }
+        TokenSource::FileSystem => {
+            // Handle filesystem-based file transfer (existing code)
+        }
     }
 
     let path = PathBuf::from(&claims.path);
@@ -321,10 +572,19 @@ pub async fn run_server(
     // Start certificate renewal background task
     let _renewal_task = tls::start_renewal_task(config.clone(), challenge_store.clone());
 
+    // Initialize tunnel manager
+    let tunnel_manager = Arc::new(TunnelManager::new());
+    info!("🌐 Tunnel manager initialized");
+    info!(
+        "   Clients can use: ryansend send <file> --server-addr {}",
+        config.base_url
+    );
+
     let state = AppState {
         config: config.clone(),
         download_tracker: Arc::new(Mutex::new(TimedMap::new())),
         challenge_store: challenge_store.clone(),
+        tunnel_manager: Some(tunnel_manager),
     };
 
     let app = Router::new()
@@ -333,6 +593,12 @@ pub async fn run_server(
             "/.well-known/acme-challenge/{token}",
             get(acme_challenge_handler),
         )
+        .route(
+            "/tunnel/announce",
+            axum::routing::post(tunnel_announce_handler),
+        )
+        .route("/tunnel/poll", get(tunnel_poll_handler))
+        .route("/tunnel/upload", axum::routing::post(tunnel_upload_handler))
         .fallback(handle_404)
         .with_state(state)
         .layer(middleware::from_fn(logging_middleware));

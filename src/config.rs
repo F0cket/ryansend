@@ -46,6 +46,8 @@ pub struct AdminConfig {
     pub tls_port: Option<u16>,
     #[serde(default)]
     pub default_expiration_seconds: Option<u64>,
+    #[serde(default)]
+    pub hashed_sharing_secrets: Vec<String>,
 }
 
 impl Config {
@@ -260,6 +262,7 @@ pub async fn init_config(base_url: String, port: u16) -> Result<Option<String>> 
         sharing_root: ".".to_string(),
         tls_port: admin_tls_port,
         default_expiration_seconds: None,
+        hashed_sharing_secrets: Vec::new(),
     };
 
     // Use environment variable for TLS port if provided
@@ -353,6 +356,49 @@ pub async fn save_config(config: &Config) -> Result<()> {
 
     log::info!("✅ Configuration saved to {}", config_path);
     Ok(())
+}
+
+/// Generate a new 256-bit tunnel secret and its hash
+pub fn generate_tunnel_secret() -> Result<(String, String)> {
+    // Generate 256-bit (32 bytes) random value
+    let mut secret_bytes = [0u8; 32];
+    rand::rng().fill_bytes(&mut secret_bytes);
+    let secret = hex::encode(secret_bytes);
+
+    // Hash it with argon2
+    let hash = generate_argon2_hash(&secret)?;
+
+    Ok((secret, hash))
+}
+
+/// Add a hashed tunnel secret to the config and save
+pub async fn add_tunnel_secret_to_config(hashed_secret: String) -> Result<()> {
+    let mut config = load_config().await?;
+
+    if let Some(ref mut admin) = config.admin {
+        admin.hashed_sharing_secrets.push(hashed_secret);
+        save_config(&config).await?;
+        Ok(())
+    } else {
+        Err(anyhow!("Admin config not found"))
+    }
+}
+
+/// Verify a tunnel secret against the list of hashed secrets
+pub fn verify_tunnel_secret(secret: &str, hashed_secrets: &[String]) -> bool {
+    use argon2::{Argon2, PasswordHash, PasswordVerifier};
+
+    for hash in hashed_secrets {
+        if let Ok(parsed_hash) = PasswordHash::new(hash) {
+            if Argon2::default()
+                .verify_password(secret.as_bytes(), &parsed_hash)
+                .is_ok()
+            {
+                return true;
+            }
+        }
+    }
+    false
 }
 
 /// Update config with environment variables preserved

@@ -9,6 +9,12 @@ use std::path::Path;
 
 use crate::config::Config;
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub enum TokenSource {
+    FileSystem,
+    Tunnel,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TokenClaims {
     pub path: String,
@@ -16,6 +22,12 @@ pub struct TokenClaims {
     pub id: String,
     pub max_uses: Option<u32>,
     pub note: Option<String>,
+    #[serde(default = "default_source")]
+    pub source: TokenSource,
+}
+
+fn default_source() -> TokenSource {
+    TokenSource::FileSystem
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -58,6 +70,7 @@ pub async fn generate_token_with_options(
         id,
         max_uses,
         note,
+        source: TokenSource::FileSystem,
     };
 
     // Parse PASERK key from config
@@ -65,6 +78,11 @@ pub async fn generate_token_with_options(
         .map_err(|e| anyhow!("Invalid PASERK key in config: {}", e))?;
 
     // Build PASETO token with claims
+    let source_str = match claims.source {
+        TokenSource::FileSystem => "filesystem",
+        TokenSource::Tunnel => "tunnel",
+    };
+
     let token = if let (Some(max_uses), Some(ref note)) = (max_uses, &claims.note) {
         PasetoBuilder::<V4, Local>::default()
             .set_claim(ExpirationClaim::try_from(claims.exp.to_rfc3339())?)
@@ -72,6 +90,7 @@ pub async fn generate_token_with_options(
             .set_claim(CustomClaim::try_from(("id", claims.id.clone()))?)
             .set_claim(CustomClaim::try_from(("max_uses", max_uses.to_string()))?)
             .set_claim(CustomClaim::try_from(("note", note.clone()))?)
+            .set_claim(CustomClaim::try_from(("source", source_str))?)
             .build(&key)?
     } else if let Some(max_uses) = max_uses {
         PasetoBuilder::<V4, Local>::default()
@@ -79,6 +98,7 @@ pub async fn generate_token_with_options(
             .set_claim(CustomClaim::try_from(("path", claims.path.clone()))?)
             .set_claim(CustomClaim::try_from(("id", claims.id.clone()))?)
             .set_claim(CustomClaim::try_from(("max_uses", max_uses.to_string()))?)
+            .set_claim(CustomClaim::try_from(("source", source_str))?)
             .build(&key)?
     } else if let Some(ref note) = claims.note {
         PasetoBuilder::<V4, Local>::default()
@@ -86,12 +106,14 @@ pub async fn generate_token_with_options(
             .set_claim(CustomClaim::try_from(("path", claims.path.clone()))?)
             .set_claim(CustomClaim::try_from(("id", claims.id.clone()))?)
             .set_claim(CustomClaim::try_from(("note", note.clone()))?)
+            .set_claim(CustomClaim::try_from(("source", source_str))?)
             .build(&key)?
     } else {
         PasetoBuilder::<V4, Local>::default()
             .set_claim(ExpirationClaim::try_from(claims.exp.to_rfc3339())?)
             .set_claim(CustomClaim::try_from(("path", claims.path.clone()))?)
             .set_claim(CustomClaim::try_from(("id", claims.id.clone()))?)
+            .set_claim(CustomClaim::try_from(("source", source_str))?)
             .build(&key)?
     };
 
@@ -193,12 +215,18 @@ pub async fn verify_token_and_get_claims(secret_key: &str, token: &str) -> Resul
 
     let note = parsed_token["note"].as_str().map(|s| s.to_string());
 
+    let source = match parsed_token["source"].as_str() {
+        Some("tunnel") => TokenSource::Tunnel,
+        _ => TokenSource::FileSystem,
+    };
+
     Ok(TokenClaims {
         path: path.to_string(),
         exp,
         id: id.to_string(),
         max_uses,
         note,
+        source,
     })
 }
 
@@ -224,4 +252,69 @@ pub fn verify_password(password: &str, hash: &str) -> bool {
             .is_ok(),
         Err(_) => false,
     }
+}
+
+/// Generate a token for a tunnel-shared file
+pub async fn generate_tunnel_token(
+    config: &Config,
+    file_id: String,
+    file_name: String,
+    file_size: u64,
+    expires_in_seconds: u64,
+) -> Result<String> {
+    let now = Utc::now();
+    let exp = now + Duration::seconds(expires_in_seconds as i64);
+
+    let claims = TokenClaims {
+        path: file_name.clone(),
+        exp,
+        id: file_id.clone(),
+        max_uses: None,
+        note: Some(format!("Tunnel transfer: {} bytes", file_size)),
+        source: TokenSource::Tunnel,
+    };
+
+    // Parse PASERK key from config
+    let key = PasetoSymmetricKey::<V4, Local>::try_from_paserk_str(&config.secret_key)
+        .map_err(|e| anyhow!("Invalid PASERK key in config: {}", e))?;
+
+    // Build PASETO token with claims
+    let token = PasetoBuilder::<V4, Local>::default()
+        .set_claim(ExpirationClaim::try_from(claims.exp.to_rfc3339())?)
+        .set_claim(CustomClaim::try_from(("path", claims.path.clone()))?)
+        .set_claim(CustomClaim::try_from(("id", claims.id.clone()))?)
+        .set_claim(CustomClaim::try_from((
+            "note",
+            claims.note.clone().unwrap_or_default(),
+        ))?)
+        .set_claim(CustomClaim::try_from(("source", "tunnel"))?)
+        .build(&key)?;
+
+    info!(
+        "Download URL generated for tunnel file: {} [token_id: {}] (note: \"{}\")",
+        file_name,
+        claims.id,
+        claims.note.unwrap_or_default()
+    );
+
+    Ok(token)
+}
+
+/// Generate a URL for a tunnel-shared file
+pub async fn generate_tunnel_url(
+    config: &Config,
+    file_id: String,
+    file_name: String,
+    file_size: u64,
+    expires_in_seconds: u64,
+) -> Result<String> {
+    let token =
+        generate_tunnel_token(config, file_id, file_name, file_size, expires_in_seconds).await?;
+
+    let download_url = format!(
+        "{}/download?token={}",
+        config.base_url.trim_end_matches('/'),
+        token
+    );
+    Ok(download_url)
 }
