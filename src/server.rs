@@ -1,5 +1,6 @@
 use anyhow::{anyhow, Result};
 
+use crate::auth;
 use axum::{
     body::Body,
     extract::{Path, Query, State},
@@ -166,14 +167,35 @@ pub async fn tunnel_announce_handler(
         file_info.name, file_info.size, file_info.id
     );
 
+    // Default expiration for tunnel files (1 hour)
+    let expires_in_seconds = 3600;
+
+    // Generate the signed download URL on the server
+    let download_url = auth::generate_tunnel_url(
+        &state.config,
+        file_info.id.clone(),
+        file_info.name.clone(),
+        file_info.size,
+        expires_in_seconds,
+    )
+    .await
+    .map_err(|e| anyhow::anyhow!("Failed to generate download URL: {}", e))?;
+
     tunnel_manager
         .register_tunnel(file_info)
         .await
         .map_err(|e| anyhow::anyhow!("Failed to register tunnel: {}", e))?;
 
+    // Return the download URL to the client
+    let response_body = serde_json::json!({
+        "download_url": download_url,
+        "expires_in": expires_in_seconds
+    });
+
     Ok(Response::builder()
         .status(StatusCode::OK)
-        .body(Body::empty())
+        .header(header::CONTENT_TYPE, "application/json")
+        .body(Body::from(serde_json::to_string(&response_body)?))
         .map_err(|e| anyhow::anyhow!("Failed to build response: {}", e))?)
 }
 

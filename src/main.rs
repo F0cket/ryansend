@@ -242,7 +242,7 @@ async fn main() -> Result<()> {
         }
         Commands::Send {
             path,
-            expires_in,
+            expires_in: _,
             server_addr,
             tunnel_secret,
         } => {
@@ -291,55 +291,41 @@ async fn main() -> Result<()> {
             // Create tunnel client with secret
             let client = TunnelClient::new(server_addr.clone(), secret);
 
-            // Announce and start serving the file
-            let file_info = match client.announce_and_serve(&path, file_id.clone()).await {
-                Ok(info) => info,
+            // Get file info for display
+            let file_name = path
+                .file_name()
+                .and_then(|n| n.to_str())
+                .unwrap_or("unknown")
+                .to_string();
+            let file_size = path.metadata().map(|m| m.len()).unwrap_or(0);
+
+            // Announce and start serving the file - server returns the signed download URL
+            let announce_response = match client.announce_and_serve(&path, file_id.clone()).await {
+                Ok(response) => response,
                 Err(e) => {
                     error!("Failed to share file: {}", e);
                     std::process::exit(1);
                 }
             };
 
-            // Load config to generate URL
-            let config = match load_config().await {
-                Ok(config) => config,
-                Err(e) => {
-                    error!("Failed to load config: {}", e);
-                    std::process::exit(1);
-                }
-            };
+            // Display success message with the URL from the server
+            println!("✅ File shared successfully!");
+            println!("📁 File: {}", file_name);
+            println!("📊 Size: {} bytes", file_size);
+            println!("🔗 Share URL: {}", announce_response.download_url);
+            println!(
+                "⏱️  Token expires in {} seconds",
+                announce_response.expires_in
+            );
+            println!("\n⚠️  Keep this terminal open to maintain the connection!");
+            info!(
+                "Tunnel established for file: {} (id: {}, expires in {}s)",
+                file_name, file_id, announce_response.expires_in
+            );
 
-            // Generate download URL
-            match auth::generate_tunnel_url(
-                &config,
-                file_info.id.clone(),
-                file_info.name.clone(),
-                file_info.size,
-                expires_in,
-            )
-            .await
-            {
-                Ok(download_url) => {
-                    println!("✅ File shared successfully!");
-                    println!("📁 File: {}", file_info.name);
-                    println!("📊 Size: {} bytes", file_info.size);
-                    println!("🔗 Share URL: {}", download_url);
-                    println!("⏱️  Token expires in {} seconds", expires_in);
-                    println!("\n⚠️  Keep this terminal open to maintain the connection!");
-                    info!(
-                        "Tunnel established for file: {} (id: {}, expires in {}s)",
-                        file_info.name, file_info.id, expires_in
-                    );
-
-                    // Keep the process alive
-                    tokio::signal::ctrl_c().await.ok();
-                    println!("\n🛑 Shutting down...");
-                }
-                Err(e) => {
-                    error!("Error generating URL: {}", e);
-                    std::process::exit(1);
-                }
-            }
+            // Keep the process alive
+            tokio::signal::ctrl_c().await.ok();
+            println!("\n🛑 Shutting down...");
         }
         Commands::SetPassword => {
             println!("Enter new admin password:");

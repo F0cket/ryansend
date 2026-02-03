@@ -14,6 +14,13 @@ pub struct TunnelFileInfo {
     pub size: u64,
 }
 
+/// Response from server after announcing a tunnel file
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TunnelAnnounceResponse {
+    pub download_url: String,
+    pub expires_in: u64,
+}
+
 /// Response to poll request
 #[derive(Debug, Serialize, Deserialize)]
 #[serde(tag = "type")]
@@ -193,11 +200,12 @@ impl TunnelClient {
     }
 
     /// Announce file to server and start polling for upload requests
+    /// Returns the download URL provided by the server
     pub async fn announce_and_serve(
         &self,
         file_path: &Path,
         file_id: String,
-    ) -> Result<TunnelFileInfo> {
+    ) -> Result<TunnelAnnounceResponse> {
         // Get file metadata
         let metadata = tokio::fs::metadata(file_path).await?;
         let file_name = file_path
@@ -228,32 +236,47 @@ impl TunnelClient {
             .await?;
 
         if !response.status().is_success() {
-            return Err(anyhow!("Failed to announce file: {}", response.status()));
+            let status = response.status();
+            let error_text = response.text().await.unwrap_or_default();
+            return Err(anyhow!(
+                "Failed to announce file: {} - {}",
+                status,
+                error_text
+            ));
         }
 
-        info!("File announced successfully");
+        // Parse the response to get the download URL
+        let announce_response: TunnelAnnounceResponse = response.json().await?;
 
         // Start polling and serving in background
         let file_path = file_path.to_path_buf();
         let base_url = self.base_url.clone();
         let secret = self.secret.clone();
         tokio::spawn(async move {
-            if let Err(e) = Self::poll_and_serve(base_url, file_id, file_path, secret).await {
+            if let Err(e) =
+                Self::poll_and_serve(base_url, file_id, file_name, file_size, file_path, secret)
+                    .await
+            {
                 error!("Error in poll and serve: {}", e);
             }
         });
 
-        Ok(file_info)
+        Ok(announce_response)
     }
 
     /// Poll for upload requests and stream file when requested
+    /// Automatically re-announces tunnel if server forgets about it (e.g., after restart)
     async fn poll_and_serve(
         base_url: String,
         file_id: String,
+        file_name: String,
+        file_size: u64,
         file_path: std::path::PathBuf,
         secret: String,
     ) -> Result<()> {
         let client = reqwest::Client::new();
+        let mut retry_delay_secs = 1u64; // Start with 1 second, exponentially increase on failures
+        const MAX_RETRY_DELAY_SECS: u64 = 60; // Cap at 60 seconds
 
         loop {
             info!("📡 Long polling server (will hold for up to 30s)...");
@@ -268,9 +291,44 @@ impl TunnelClient {
                 .await
             {
                 Ok(response) => {
-                    if !response.status().is_success() {
-                        warn!("❌ Poll failed with status: {}", response.status());
-                        tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    let status = response.status();
+                    if !status.is_success() {
+                        // If server returns 404, it likely restarted and forgot about our tunnel
+                        // Re-announce to re-establish the connection
+                        if status == reqwest::StatusCode::NOT_FOUND {
+                            info!("🔄 Server doesn't recognize tunnel (likely restarted). Re-announcing...");
+
+                            let file_info = TunnelFileInfo {
+                                id: file_id.clone(),
+                                name: file_name.clone(),
+                                size: file_size,
+                            };
+
+                            match client
+                                .post(format!("{}/tunnel/announce", base_url))
+                                .header("Authorization", format!("Bearer {}", secret))
+                                .json(&file_info)
+                                .send()
+                                .await
+                            {
+                                Ok(resp) if resp.status().is_success() => {
+                                    info!("✅ Tunnel re-announced successfully!");
+                                }
+                                Ok(resp) => {
+                                    warn!("Failed to re-announce tunnel: {}", resp.status());
+                                }
+                                Err(e) => {
+                                    warn!("Failed to re-announce tunnel: {}", e);
+                                }
+                            }
+                        } else {
+                            warn!("❌ Poll failed with status: {}", status);
+                        }
+                        warn!("Retrying in {} seconds...", retry_delay_secs);
+                        tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay_secs))
+                            .await;
+                        // Exponential backoff with cap
+                        retry_delay_secs = (retry_delay_secs * 2).min(MAX_RETRY_DELAY_SECS);
                         continue;
                     }
 
@@ -287,6 +345,8 @@ impl TunnelClient {
                         PollResponse::Wait => {
                             // Server timed out, no download request - poll again
                             info!("⏱️  Poll timeout (no download), polling again...");
+                            // Reset retry delay on successful poll
+                            retry_delay_secs = 1;
                         }
                         PollResponse::Upload {
                             file_id: req_file_id,
@@ -299,14 +359,22 @@ impl TunnelClient {
                                 .await
                                 {
                                     error!("Failed to stream file: {}", e);
+                                } else {
+                                    // Reset retry delay on successful upload
+                                    retry_delay_secs = 1;
                                 }
                             }
                         }
                     }
                 }
                 Err(e) => {
-                    warn!("❌ Poll request failed: {} - retrying in 5s", e);
-                    tokio::time::sleep(tokio::time::Duration::from_secs(5)).await;
+                    warn!(
+                        "❌ Poll request failed: {} - retrying in {}s",
+                        e, retry_delay_secs
+                    );
+                    tokio::time::sleep(tokio::time::Duration::from_secs(retry_delay_secs)).await;
+                    // Exponential backoff with cap
+                    retry_delay_secs = (retry_delay_secs * 2).min(MAX_RETRY_DELAY_SECS);
                 }
             }
         }

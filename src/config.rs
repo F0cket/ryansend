@@ -215,6 +215,47 @@ pub async fn load_config() -> Result<Config> {
     Ok(config)
 }
 
+/// Load config from file if it exists, otherwise create minimal config from env vars
+/// This is useful for commands like `send` that don't require a full config file
+#[allow(dead_code)]
+pub async fn load_config_or_env() -> Result<Config> {
+    let config_path = get_config_file_path();
+
+    // Try to load from file first
+    if tokio::fs::try_exists(&config_path).await.unwrap_or(false) {
+        return load_config().await;
+    }
+
+    // If config file doesn't exist, build from env vars
+    let base_url = std::env::var("RYANSEND_BASE_URL").map_err(|_| {
+        anyhow!("RYANSEND_BASE_URL environment variable required when config file doesn't exist")
+    })?;
+
+    let secret_key = std::env::var("RYANSEND_SECRET_KEY")
+        .map_err(|_| anyhow!("RYANSEND_SECRET_KEY environment variable required when config file doesn't exist. This should be a PASERK key."))?;
+
+    let port = std::env::var("RYANSEND_PORT")
+        .ok()
+        .and_then(|p| p.parse().ok())
+        .unwrap_or(3000);
+
+    // Create minimal config from env vars
+    let config = Config {
+        base_url,
+        port,
+        secret_key,
+        admin: None,
+        remove_kofi: false,
+        tls_port: None,
+        cert_path: None,
+        cert_key_path: None,
+        use_letsencrypt_cert: false,
+        lets_encrypt: None,
+    };
+
+    Ok(config)
+}
+
 fn generate_argon2_hash(password: &str) -> Result<String> {
     let salt = SaltString::generate(&mut OsRng);
     let argon2 = Argon2::default();
@@ -418,6 +459,7 @@ pub fn verify_tunnel_secret(secret: &str, hashed_secrets: &[String]) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use serial_test::serial;
     use std::env;
 
     #[tokio::test]
@@ -688,5 +730,97 @@ remove_kofi: false
         };
 
         assert!(config_near.is_cert_renewal_needed());
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_load_config_or_env() {
+        // Save existing env vars
+        let old_config_file = env::var("RYANSEND_CONFIG_FILE").ok();
+        let old_base_url = env::var("RYANSEND_BASE_URL").ok();
+        let old_secret_key = env::var("RYANSEND_SECRET_KEY").ok();
+        let old_port = env::var("RYANSEND_PORT").ok();
+
+        // Create a temporary directory for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+
+        // Set env var to point to non-existent config file
+        env::set_var("RYANSEND_CONFIG_FILE", config_path.to_str().unwrap());
+
+        // Set required environment variables
+        env::set_var("RYANSEND_BASE_URL", "http://test.example.com:3000");
+        env::set_var(
+            "RYANSEND_SECRET_KEY",
+            "k4.local.test-key-for-testing-purposes-only",
+        );
+        env::set_var("RYANSEND_PORT", "4000");
+
+        // Load config - should fall back to env vars since file doesn't exist
+        let config = load_config_or_env().await.unwrap();
+
+        assert_eq!(config.base_url, "http://test.example.com:3000");
+        assert_eq!(config.port, 4000);
+        assert_eq!(
+            config.secret_key,
+            "k4.local.test-key-for-testing-purposes-only"
+        );
+        assert!(config.admin.is_none());
+
+        // Restore original env vars
+        match old_config_file {
+            Some(v) => env::set_var("RYANSEND_CONFIG_FILE", v),
+            None => env::remove_var("RYANSEND_CONFIG_FILE"),
+        }
+        match old_base_url {
+            Some(v) => env::set_var("RYANSEND_BASE_URL", v),
+            None => env::remove_var("RYANSEND_BASE_URL"),
+        }
+        match old_secret_key {
+            Some(v) => env::set_var("RYANSEND_SECRET_KEY", v),
+            None => env::remove_var("RYANSEND_SECRET_KEY"),
+        }
+        match old_port {
+            Some(v) => env::set_var("RYANSEND_PORT", v),
+            None => env::remove_var("RYANSEND_PORT"),
+        }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn test_load_config_or_env_missing_vars() {
+        // Save existing env vars
+        let old_config_file = env::var("RYANSEND_CONFIG_FILE").ok();
+        let old_base_url = env::var("RYANSEND_BASE_URL").ok();
+        let old_secret_key = env::var("RYANSEND_SECRET_KEY").ok();
+
+        // Create a temporary directory for testing
+        let temp_dir = tempfile::tempdir().unwrap();
+        let config_path = temp_dir.path().join("config.yaml");
+
+        // Set env var to point to non-existent config file
+        env::set_var("RYANSEND_CONFIG_FILE", config_path.to_str().unwrap());
+
+        // Don't set required env vars - should fail
+        env::remove_var("RYANSEND_BASE_URL");
+        env::remove_var("RYANSEND_SECRET_KEY");
+
+        // Should fail because required env vars are missing
+        let result = load_config_or_env().await;
+        assert!(result.is_err());
+
+        // Restore original env vars
+        match old_config_file {
+            Some(v) => env::set_var("RYANSEND_CONFIG_FILE", v),
+            None => env::remove_var("RYANSEND_CONFIG_FILE"),
+        }
+        match old_base_url {
+            Some(v) => env::set_var("RYANSEND_BASE_URL", v),
+            None => env::remove_var("RYANSEND_BASE_URL"),
+        }
+        match old_secret_key {
+            Some(v) => env::set_var("RYANSEND_SECRET_KEY", v),
+            None => env::remove_var("RYANSEND_SECRET_KEY"),
+        }
     }
 }

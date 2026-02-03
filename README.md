@@ -20,6 +20,12 @@ ryansend has a single executable file, that runs in three modes:
 
 `ryansend send` lets you securely share files from **any computer** that can reach your ryansend server. No port forwarding, HTTPS setup, or network configuration needed on your computer, just the server! The file is streamed through your server in real-time when someone downloads it. Keep the terminal open while sharing.
 
+**Note:** The `send` command does not require a `config.yaml` file! Just provide:
+- `--server-addr` or `RYANSEND_BASE_URL` environment variable with your server URL (e.g., `https://example.com:3000`)
+- `--tunnel-secret` or `RYANSEND_TUNNEL_SECRET` environment variable with your tunnel secret (get this from your server's admin panel)
+
+The server generates and returns the signed download URL for you automatically!
+
 `ryansend start` turns on a webserver. A single URL prefix is exposed on port 3000, matching the URLs generated from `ryansend share` and 
 
 ## What is this for?
@@ -109,6 +115,12 @@ There are three suggested ways to get secure connections:
   - Great if you want faster speed than cloudflared, but want to use a different provider or self signed certs.
   - If you want to use manual SSL certificates, you can use a tool like [certbot](https://certbot.eff.org/) or [acme.sh](https://github.com/acmesh-official/acme.sh).
 
+
+## Install context menu in MacOS Finder
+
+`ryansend send` is easy enough to use from the command line, but you can also install a context menu in MacOS Finder to make it even easier. Install ryansend on your Mac using `cargo install --path .` from this repo, which will put `ryansend` in your path (requires you to install cargo). 
+
+Once you have ryansend cli installed with cargo, you can then run `./scripts/install_context_menu.sh` to install the context menu. This just moves a simple automator script that will let you right click a file and send it to ryansend through the "Quick Actions".
 
 ## FAQ
 
