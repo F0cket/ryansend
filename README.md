@@ -122,6 +122,9 @@ There are three suggested ways to get secure connections:
 
 Once you have ryansend cli installed with cargo, you can then run `./scripts/install_context_menu.sh` to install the context menu. This just moves a simple automator script that will let you right click a file and send it to ryansend through the "Quick Actions".
 
+<img width="1074" height="637" alt="image" src="https://github.com/user-attachments/assets/d52cbecb-2e25-4c23-94a7-87d30e8b5b2d" />
+
+
 ## FAQ
 
 - **When would I use this instead of FileBrowser-PNP?**
