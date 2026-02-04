@@ -33,7 +33,7 @@ url = "2.5"
 futures = "0.3"
 async-stream = "0.3"
 bytes = "1.11"
-reqwest = { version = "0.11", features = ["json", "stream"] }
+reqwest = { version = "0.13", features = ["json", "stream", "query"] }
 # TLS and certificate management dependencies
 rustls = "0.23"
 rustls-pki-types = { version = "1.13", features = ["std"] }
